@@ -8,3 +8,4 @@ class LockNames(Enum):
     LAST_APPLIED_LOCK = 4
     NEXT_INDEX_LOCK = 5
     MATCH_INDEX_LOCK = 6
+    CONN_HANDLER_LOCK = 7

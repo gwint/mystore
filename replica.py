@@ -8,12 +8,14 @@ import logging
 from dotenv import load_dotenv
 from os import getenv
 from random import randint
+from socket import gethostname, gethostbyname
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 
+from connectionhandler import ConnectionHandler
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
@@ -22,6 +24,7 @@ from replicaservice.ttypes import Ballot, Response, Entry
 class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
     MAX_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MAX_MS"
+    CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE"
 
     def __init__(self, port):
         load_dotenv()
@@ -37,7 +40,12 @@ class Replica:
         self._matchIndex = []
         self._timeout = self._getElectionTimeout()
 
-        self.lockHandler = LockHandler(7)
+        clusterMembership = self._getClusterMembership()
+        localIP = gethostbyname(gethostname())
+        clusterMembership.remove((localIP, port))
+        self._connectionHandler = ConnectionHandler(clusterMembership)
+
+        self.lockHandler = LockHandler(8)
 
     def __str__(self):
         return ""
@@ -52,6 +60,23 @@ class Replica:
             raise ValueError("Attempted to read value from nonexistent enviornemnt variable {Replica.MAX_ELECTION_TIMEOUT_ENV_VAR_NAME}")
 
         return randint(int(minTimeMS), int(maxTimeMS))
+
+    def _getClusterMembership(self):
+        membership = set()
+        membershipFile = getenv(Replica.CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME)
+
+        with open(membershipFile, 'r') as membershipFileObj:
+            line = membershipFileObj.readline()
+            while line:
+                host, port = line.strip().split(':')
+                try:
+                    membership.add((host, int(port)))
+                except ValueError:
+                    raise ValueError(f'All ports in {Replica.CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME} must be integer values.  {port} is not.')
+
+                line = membershipFileObj.readline()
+
+        return membership
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
