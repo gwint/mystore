@@ -34,15 +34,15 @@ struct Ballot {
 
 service ReplicaService {
 
-    Ballot request_vote(1:i32 term,
-                        2:i32 candidate_id,
-                        3:i32 last_log_index,
-                        4:i32 last_log_term),
+    Ballot requestVote(1:i32 term,
+                       2:i32 candidate_id,
+                       3:i32 last_log_index,
+                       4:i32 last_log_term),
 
-    Response append_entry(1:i32 term,
-                          2:i32 leader_id,
-                          3:i32 prev_log_index,
-                          4:i32 prev_log_term,
-                          5:Entry entry,
-                          6:i32 leader_commit)
+    Response appendEntry(1:i32 term,
+                         2:i32 leader_id,
+                         3:i32 prev_log_index,
+                         4:i32 prev_log_term,
+                         5:Entry entry,
+                         6:i32 leader_commit)
 }

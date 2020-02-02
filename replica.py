@@ -43,6 +43,22 @@ class Replica:
 
         self.lockHandler = LockHandler(8)
 
+    def requestVote(self,
+                    term,
+                    candidateID,
+                    lastLogIndex,
+                    lastLogTerm):
+        pass
+
+    def appendEntry(self,
+                    term,
+                    leaderID,
+                    prevLogIndex,
+                    prevLogTerm,
+                    entry,
+                    leaderCommit):
+        pass
+
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)
         maxTimeMS = getenv(Replica.MAX_ELECTION_TIMEOUT_ENV_VAR_NAME)
