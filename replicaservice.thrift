@@ -32,7 +32,7 @@ struct Ballot {
     2: i32 term
 }
 
-service Replica {
+service ReplicaService {
 
     Ballot request_vote(1:i32 term,
                         2:i32 candidate_id,

@@ -1,10 +1,13 @@
 #!/usr/bin/python3
 
+import sys
+
+sys.path.append('gen-py')
+
 import logging
 from dotenv import load_dotenv
 from os import getenv
 from random import randint
-import sys
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
@@ -13,6 +16,8 @@ from thrift.server import TServer
 
 from states import ReplicaState
 from lockhandler import LockHandler
+from replicaservice import ReplicaService
+
 
 class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
@@ -59,6 +64,14 @@ if __name__ == "__main__":
         portToUse = int(portStr)
         print(f'Running on port {portToUse}')
         replica = Replica(portToUse)
+
+        processor = ReplicaService.Processor(replica)
+        transport = TSocket.TServerSocket(host='127.0.0.1', port=portToUse)
+        tfactory = TTransport.TBufferedTransportFactory()
+        pfactory = TBinaryProtocol.TBinaryProtocolFactory()
+
+        server = TServer.TSimpleServer(processor, transport, tfactory, pfactory)
+        server.serve()
 
     except ValueError:
         raise ValueError(f'The provided port number ({portStr}) must contain only digits')
