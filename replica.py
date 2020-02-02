@@ -15,7 +15,6 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 
-from connectionhandler import ConnectionHandler
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
@@ -40,15 +39,9 @@ class Replica:
         self._matchIndex = []
         self._timeout = self._getElectionTimeout()
 
-        clusterMembership = self._getClusterMembership()
-        localIP = gethostbyname(gethostname())
-        clusterMembership.remove((localIP, port))
-        self._connectionHandler = ConnectionHandler(clusterMembership)
+        self._clusterMembership = self._getClusterMembership()
 
         self.lockHandler = LockHandler(8)
-
-    def __str__(self):
-        return ""
 
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)
@@ -76,6 +69,9 @@ class Replica:
 
                 line = membershipFileObj.readline()
 
+        localIP = gethostbyname(gethostname())
+        membership.remove((localIP, self._replicaToReplicaCommPort))
+
         return membership
 
 if __name__ == "__main__":
@@ -100,4 +96,3 @@ if __name__ == "__main__":
 
     except ValueError:
         raise ValueError(f'The provided port number ({portStr}) must contain only digits')
-
