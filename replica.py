@@ -17,7 +17,7 @@ from thrift.server import TServer
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
-
+from replicaservice.ttypes import Ballot, Response, Entry
 
 class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
