@@ -27,6 +27,7 @@ class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
     MAX_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MAX_MS"
     CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE"
+    HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS"
 
     def __init__(self, port):
         load_dotenv()
@@ -42,12 +43,14 @@ class Replica:
         self._matchIndex = []
         self._timeout = self._getElectionTimeout()
         self._timeLeft = self._timeout
+        self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
 
         self._clusterMembership = self._getClusterMembership()
 
         self._lockHandler = LockHandler(9)
 
         Thread(target=self._timer).start()
+        Thread(target=self._heartbeatSender).start()
 
     def requestVote(self,
                     term,
@@ -109,6 +112,11 @@ class Replica:
             self._lockHandler.releaseLocks(LockNames.TIMER_LOCK)
 
             sleep(0.001)
+
+    def _heartbeatSender(self):
+        while True:
+            print("Now Sending a heartbeat!")
+            sleep(self._heartbeatTick / 1000)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
