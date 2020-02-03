@@ -9,12 +9,15 @@ from dotenv import load_dotenv
 from os import getenv
 from random import randint
 from socket import gethostname, gethostbyname
+from time import sleep
+from threading import Thread
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 
+from locknames import LockNames
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
@@ -38,10 +41,13 @@ class Replica:
         self._nextIndex = []
         self._matchIndex = []
         self._timeout = self._getElectionTimeout()
+        self._timeLeft = self._timeout
 
         self._clusterMembership = self._getClusterMembership()
 
-        self.lockHandler = LockHandler(8)
+        self._lockHandler = LockHandler(9)
+
+        Thread(target=self._timer).start()
 
     def requestVote(self,
                     term,
@@ -89,6 +95,20 @@ class Replica:
         membership.remove((localIP, self._replicaToReplicaCommPort))
 
         return membership
+
+    def _timer(self):
+        while True:
+            self._lockHandler.acquireLocks(LockNames.TIMER_LOCK)
+
+            if self._timeLeft == 0:
+                print("Time has expired!")
+                self._lockHandler.releaseLocks(LockNames.TIMER_LOCK)
+                break
+
+            self._timeLeft -= 1
+            self._lockHandler.releaseLocks(LockNames.TIMER_LOCK)
+
+            sleep(0.001)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

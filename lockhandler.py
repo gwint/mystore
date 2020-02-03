@@ -12,13 +12,14 @@ class LockHandler:
 
         lockNames = args
 
+        currThreadId = get_ident()
+
         for name in lockNames:
             if name >= len(self._allStoredLocks):
                 raise ValueError("Cannot acquire lock: invalid lock name provided: %d" % name)
 
             lockToAcquire = self._allStoredLocks[name]
 
-            currThreadId = get_ident()
             currentThreadLocks = \
                     self._perThreadAcquiredLocks.get(currThreadId, set())
 
@@ -37,11 +38,15 @@ class LockHandler:
             raise ValueError("The name of at least one lock must be provided when attempting to call releaseLocks")
 
         lockNames = args
+
+        currThreadId = get_ident()
+
         sortedIndices = sorted(lockNames)
         for i in range(-1, -len(args)-1, -1):
             nameOfLockToRelease = lockNames[i]
             lockToRelease = self._allStoredLocks[nameOfLockToRelease]
             lockToRelease.release()
+            self._perThreadAcquiredLocks[currThreadId].remove(lockToRelease)
 
     def __str__(self):
         return "Lock Elements: %s" % self._locks
