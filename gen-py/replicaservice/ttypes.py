@@ -202,14 +202,14 @@ class Response(object):
 class Ballot(object):
     """
     Attributes:
-     - status
+     - voteGranted
      - term
 
     """
 
 
-    def __init__(self, status=None, term=None,):
-        self.status = status
+    def __init__(self, voteGranted=None, term=None,):
+        self.voteGranted = voteGranted
         self.term = term
 
     def read(self, iprot):
@@ -223,7 +223,7 @@ class Ballot(object):
                 break
             if fid == 1:
                 if ftype == TType.BOOL:
-                    self.status = iprot.readBool()
+                    self.voteGranted = iprot.readBool()
                 else:
                     iprot.skip(ftype)
             elif fid == 2:
@@ -241,9 +241,9 @@ class Ballot(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('Ballot')
-        if self.status is not None:
-            oprot.writeFieldBegin('status', TType.BOOL, 1)
-            oprot.writeBool(self.status)
+        if self.voteGranted is not None:
+            oprot.writeFieldBegin('voteGranted', TType.BOOL, 1)
+            oprot.writeBool(self.voteGranted)
             oprot.writeFieldEnd()
         if self.term is not None:
             oprot.writeFieldBegin('term', TType.I32, 2)
@@ -351,7 +351,7 @@ Response.thrift_spec = (
 all_structs.append(Ballot)
 Ballot.thrift_spec = (
     None,  # 0
-    (1, TType.BOOL, 'status', None, None, ),  # 1
+    (1, TType.BOOL, 'voteGranted', None, None, ),  # 1
     (2, TType.I32, 'term', None, None, ),  # 2
 )
 all_structs.append(ID)

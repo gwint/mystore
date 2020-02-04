@@ -36,7 +36,7 @@ class Replica:
 
         self._state = ReplicaState.FOLLOWER
         self._currentTerm = 0
-        self._log = []
+        self._log = [self._getEmptyLogEntry()]
         self._commitIndex = 0
         self._lastApplied = 0
         self._nextIndex = []
@@ -70,6 +70,15 @@ class Replica:
         ballot = Ballot()
         ballot.status = False
         ballot.term = 0
+
+        self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.STATE_LOCK)
+
+
+        self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.STATE_LOCK)
 
         return ballot
 
@@ -119,6 +128,14 @@ class Replica:
         newID.port = port
 
         return newID
+
+    def _getEmptyLogEntry(self):
+        emptyLogEntry = Entry()
+        emtpyLogEntry.key = -1
+        emptyLogEntry.value = -1
+        emptyLogEntry.term = -1
+
+        return emptyLogEntry
 
     def _timer(self):
         sleep(7)

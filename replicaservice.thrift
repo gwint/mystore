@@ -28,7 +28,7 @@ struct Response {
 }
 
 struct Ballot {
-    1: bool status,
+    1: bool voteGranted,
     2: i32 term
 }
 
