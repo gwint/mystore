@@ -59,7 +59,7 @@ class Replica:
         self._lockHandler = LockHandler(9)
 
         Thread(target=self._timer).start()
-        #Thread(target=self._heartbeatSender).start()
+        Thread(target=self._heartbeatSender).start()
 
     def requestVote(self, \
                     term, \
@@ -114,6 +114,7 @@ class Replica:
         return membership
 
     def _timer(self):
+        sleep(3)
         while True:
             self._lockHandler.acquireLocks(LockNames.TIMER_LOCK)
 
@@ -126,12 +127,10 @@ class Replica:
                     protocol = TBinaryProtocol.TBinaryProtocol(transport)
                     client = ReplicaService.Client(protocol)
 
-                    '''
-                    ballot = client.requestVote(self._currentTerm, \
+                    ballot = client.requestVote(0, \
                                                 0, \
                                                 0, \
                                                 0)
-                    '''
 
                 self._lockHandler.releaseLocks(LockNames.TIMER_LOCK)
                 break
