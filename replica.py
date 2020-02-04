@@ -44,7 +44,7 @@ class Replica:
         self._timeout = self._getElectionTimeout()
         self._timeLeft = self._timeout
         self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
-        self._myID = (gethostbyname(gethostname()), port)
+        self._myID = ("127.0.0.1", port) #(gethostbyname(gethostname()), port)
 
         self._clusterMembership = self._getClusterMembership()
         print(self._clusterMembership)
@@ -114,7 +114,7 @@ class Replica:
         return membership
 
     def _timer(self):
-        sleep(3)
+        sleep(7)
         while True:
             self._lockHandler.acquireLocks(LockNames.TIMER_LOCK)
 
@@ -122,8 +122,10 @@ class Replica:
                 self._logger.debug("Time has expired!")
 
                 for host, port in self._clusterMembership:
+                    print(f'{host}:{port}')
                     transport = TSocket.TSocket(host, port)
                     transport = TTransport.TBufferedTransport(transport)
+                    transport.open()
                     protocol = TBinaryProtocol.TBinaryProtocol(transport)
                     client = ReplicaService.Client(protocol)
 
@@ -157,12 +159,15 @@ if __name__ == "__main__":
         print(f'Running on port {portToUse}')
         replica = Replica(portToUse)
 
-        processor = ReplicaService.Processor(replica)
         transport = TSocket.TServerSocket(host='127.0.0.1', port=portToUse)
         tfactory = TTransport.TBufferedTransportFactory()
         pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
+        processor = ReplicaService.Processor(replica)
+
         server = TServer.TSimpleServer(processor, transport, tfactory, pfactory)
+
+        print("Now listening...")
         server.serve()
 
     except ValueError:
