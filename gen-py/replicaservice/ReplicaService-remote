@@ -24,8 +24,8 @@ if len(sys.argv) <= 1 or sys.argv[1] == '--help':
     print('Usage: ' + sys.argv[0] + ' [-h host[:port]] [-u url] [-f[ramed]] [-s[sl]] [-novalidate] [-ca_certs certs] [-keyfile keyfile] [-certfile certfile] function [arg1 [arg2...]]')
     print('')
     print('Functions:')
-    print('  Ballot request_vote(i32 term, i32 candidate_id, i32 last_log_index, i32 last_log_term)')
-    print('  Response append_entry(i32 term, i32 leader_id, i32 prev_log_index, i32 prev_log_term, Entry entry, i32 leader_commit)')
+    print('  Ballot requestVote(i32 term, i32 candidate_id, i32 last_log_index, i32 last_log_term)')
+    print('  Response appendEntry(i32 term, i32 leader_id, i32 prev_log_index, i32 prev_log_term, Entry entry, i32 leader_commit)')
     print('')
     sys.exit(0)
 
@@ -105,17 +105,17 @@ protocol = TBinaryProtocol(transport)
 client = ReplicaService.Client(protocol)
 transport.open()
 
-if cmd == 'request_vote':
+if cmd == 'requestVote':
     if len(args) != 4:
-        print('request_vote requires 4 args')
+        print('requestVote requires 4 args')
         sys.exit(1)
-    pp.pprint(client.request_vote(eval(args[0]), eval(args[1]), eval(args[2]), eval(args[3]),))
+    pp.pprint(client.requestVote(eval(args[0]), eval(args[1]), eval(args[2]), eval(args[3]),))
 
-elif cmd == 'append_entry':
+elif cmd == 'appendEntry':
     if len(args) != 6:
-        print('append_entry requires 6 args')
+        print('appendEntry requires 6 args')
         sys.exit(1)
-    pp.pprint(client.append_entry(eval(args[0]), eval(args[1]), eval(args[2]), eval(args[3]), eval(args[4]), eval(args[5]),))
+    pp.pprint(client.appendEntry(eval(args[0]), eval(args[1]), eval(args[2]), eval(args[3]), eval(args[4]), eval(args[5]),))
 
 else:
     print('Unrecognized method %s' % cmd)

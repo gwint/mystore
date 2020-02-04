@@ -44,29 +44,44 @@ class Replica:
         self._timeout = self._getElectionTimeout()
         self._timeLeft = self._timeout
         self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
+        self._myID = (gethostbyname(gethostname()), port)
 
         self._clusterMembership = self._getClusterMembership()
+        print(self._clusterMembership)
+
+        self._logger = logging.getLogger(f'{self._myID}_logger')
+        handler = logging.FileHandler(f'{self._myID[0]}:{self._myID[1]}.log')
+        formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+        handler.setFormatter(formatter)
+        self._logger.addHandler(handler)
+        self._logger.setLevel(logging.DEBUG)
 
         self._lockHandler = LockHandler(9)
 
         Thread(target=self._timer).start()
-        Thread(target=self._heartbeatSender).start()
+        #Thread(target=self._heartbeatSender).start()
 
-    def requestVote(self,
-                    term,
-                    candidateID,
-                    lastLogIndex,
+    def requestVote(self, \
+                    term, \
+                    candidateID, \
+                    lastLogIndex, \
                     lastLogTerm):
-        pass
+        self._logger.debug("Someone is requesting my vote!")
+        ballot = Ballot()
+        ballot.status = False
+        ballot.term = 0
 
-    def appendEntry(self,
-                    term,
-                    leaderID,
-                    prevLogIndex,
-                    prevLogTerm,
-                    entry,
+        return ballot
+
+    def appendEntry(self, \
+                    term, \
+                    leaderID, \
+                    prevLogIndex, \
+                    prevLogTerm, \
+                    entry, \
                     leaderCommit):
-        pass
+        self._logger.debug("Someone is appending an entry to my log!")
+        return Response()
 
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)
@@ -94,8 +109,7 @@ class Replica:
 
                 line = membershipFileObj.readline()
 
-        localIP = gethostbyname(gethostname())
-        membership.remove((localIP, self._replicaToReplicaCommPort))
+        membership.remove(self._myID)
 
         return membership
 
@@ -104,7 +118,21 @@ class Replica:
             self._lockHandler.acquireLocks(LockNames.TIMER_LOCK)
 
             if self._timeLeft == 0:
-                print("Time has expired!")
+                self._logger.debug("Time has expired!")
+
+                for host, port in self._clusterMembership:
+                    transport = TSocket.TSocket(host, port)
+                    transport = TTransport.TBufferedTransport(transport)
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
+
+                    '''
+                    ballot = client.requestVote(self._currentTerm, \
+                                                0, \
+                                                0, \
+                                                0)
+                    '''
+
                 self._lockHandler.releaseLocks(LockNames.TIMER_LOCK)
                 break
 
@@ -115,7 +143,7 @@ class Replica:
 
     def _heartbeatSender(self):
         while True:
-            print("Now Sending a heartbeat!")
+            self._logger.debug("Now Sending a heartbeat!")
             sleep(self._heartbeatTick / 1000)
 
 if __name__ == "__main__":

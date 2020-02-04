@@ -19,7 +19,7 @@ all_structs = []
 
 
 class Iface(object):
-    def request_vote(self, term, candidate_id, last_log_index, last_log_term):
+    def requestVote(self, term, candidate_id, last_log_index, last_log_term):
         """
         Parameters:
          - term
@@ -30,7 +30,7 @@ class Iface(object):
         """
         pass
 
-    def append_entry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
+    def appendEntry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
         """
         Parameters:
          - term
@@ -51,7 +51,7 @@ class Client(Iface):
             self._oprot = oprot
         self._seqid = 0
 
-    def request_vote(self, term, candidate_id, last_log_index, last_log_term):
+    def requestVote(self, term, candidate_id, last_log_index, last_log_term):
         """
         Parameters:
          - term
@@ -60,12 +60,12 @@ class Client(Iface):
          - last_log_term
 
         """
-        self.send_request_vote(term, candidate_id, last_log_index, last_log_term)
-        return self.recv_request_vote()
+        self.send_requestVote(term, candidate_id, last_log_index, last_log_term)
+        return self.recv_requestVote()
 
-    def send_request_vote(self, term, candidate_id, last_log_index, last_log_term):
-        self._oprot.writeMessageBegin('request_vote', TMessageType.CALL, self._seqid)
-        args = request_vote_args()
+    def send_requestVote(self, term, candidate_id, last_log_index, last_log_term):
+        self._oprot.writeMessageBegin('requestVote', TMessageType.CALL, self._seqid)
+        args = requestVote_args()
         args.term = term
         args.candidate_id = candidate_id
         args.last_log_index = last_log_index
@@ -74,7 +74,7 @@ class Client(Iface):
         self._oprot.writeMessageEnd()
         self._oprot.trans.flush()
 
-    def recv_request_vote(self):
+    def recv_requestVote(self):
         iprot = self._iprot
         (fname, mtype, rseqid) = iprot.readMessageBegin()
         if mtype == TMessageType.EXCEPTION:
@@ -82,14 +82,14 @@ class Client(Iface):
             x.read(iprot)
             iprot.readMessageEnd()
             raise x
-        result = request_vote_result()
+        result = requestVote_result()
         result.read(iprot)
         iprot.readMessageEnd()
         if result.success is not None:
             return result.success
-        raise TApplicationException(TApplicationException.MISSING_RESULT, "request_vote failed: unknown result")
+        raise TApplicationException(TApplicationException.MISSING_RESULT, "requestVote failed: unknown result")
 
-    def append_entry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
+    def appendEntry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
         """
         Parameters:
          - term
@@ -100,12 +100,12 @@ class Client(Iface):
          - leader_commit
 
         """
-        self.send_append_entry(term, leader_id, prev_log_index, prev_log_term, entry, leader_commit)
-        return self.recv_append_entry()
+        self.send_appendEntry(term, leader_id, prev_log_index, prev_log_term, entry, leader_commit)
+        return self.recv_appendEntry()
 
-    def send_append_entry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
-        self._oprot.writeMessageBegin('append_entry', TMessageType.CALL, self._seqid)
-        args = append_entry_args()
+    def send_appendEntry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
+        self._oprot.writeMessageBegin('appendEntry', TMessageType.CALL, self._seqid)
+        args = appendEntry_args()
         args.term = term
         args.leader_id = leader_id
         args.prev_log_index = prev_log_index
@@ -116,7 +116,7 @@ class Client(Iface):
         self._oprot.writeMessageEnd()
         self._oprot.trans.flush()
 
-    def recv_append_entry(self):
+    def recv_appendEntry(self):
         iprot = self._iprot
         (fname, mtype, rseqid) = iprot.readMessageBegin()
         if mtype == TMessageType.EXCEPTION:
@@ -124,20 +124,20 @@ class Client(Iface):
             x.read(iprot)
             iprot.readMessageEnd()
             raise x
-        result = append_entry_result()
+        result = appendEntry_result()
         result.read(iprot)
         iprot.readMessageEnd()
         if result.success is not None:
             return result.success
-        raise TApplicationException(TApplicationException.MISSING_RESULT, "append_entry failed: unknown result")
+        raise TApplicationException(TApplicationException.MISSING_RESULT, "appendEntry failed: unknown result")
 
 
 class Processor(Iface, TProcessor):
     def __init__(self, handler):
         self._handler = handler
         self._processMap = {}
-        self._processMap["request_vote"] = Processor.process_request_vote
-        self._processMap["append_entry"] = Processor.process_append_entry
+        self._processMap["requestVote"] = Processor.process_requestVote
+        self._processMap["appendEntry"] = Processor.process_appendEntry
 
     def process(self, iprot, oprot):
         (name, type, seqid) = iprot.readMessageBegin()
@@ -154,13 +154,13 @@ class Processor(Iface, TProcessor):
             self._processMap[name](self, seqid, iprot, oprot)
         return True
 
-    def process_request_vote(self, seqid, iprot, oprot):
-        args = request_vote_args()
+    def process_requestVote(self, seqid, iprot, oprot):
+        args = requestVote_args()
         args.read(iprot)
         iprot.readMessageEnd()
-        result = request_vote_result()
+        result = requestVote_result()
         try:
-            result.success = self._handler.request_vote(args.term, args.candidate_id, args.last_log_index, args.last_log_term)
+            result.success = self._handler.requestVote(args.term, args.candidate_id, args.last_log_index, args.last_log_term)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -172,18 +172,18 @@ class Processor(Iface, TProcessor):
             logging.exception('Unexpected exception in handler')
             msg_type = TMessageType.EXCEPTION
             result = TApplicationException(TApplicationException.INTERNAL_ERROR, 'Internal error')
-        oprot.writeMessageBegin("request_vote", msg_type, seqid)
+        oprot.writeMessageBegin("requestVote", msg_type, seqid)
         result.write(oprot)
         oprot.writeMessageEnd()
         oprot.trans.flush()
 
-    def process_append_entry(self, seqid, iprot, oprot):
-        args = append_entry_args()
+    def process_appendEntry(self, seqid, iprot, oprot):
+        args = appendEntry_args()
         args.read(iprot)
         iprot.readMessageEnd()
-        result = append_entry_result()
+        result = appendEntry_result()
         try:
-            result.success = self._handler.append_entry(args.term, args.leader_id, args.prev_log_index, args.prev_log_term, args.entry, args.leader_commit)
+            result.success = self._handler.appendEntry(args.term, args.leader_id, args.prev_log_index, args.prev_log_term, args.entry, args.leader_commit)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -195,7 +195,7 @@ class Processor(Iface, TProcessor):
             logging.exception('Unexpected exception in handler')
             msg_type = TMessageType.EXCEPTION
             result = TApplicationException(TApplicationException.INTERNAL_ERROR, 'Internal error')
-        oprot.writeMessageBegin("append_entry", msg_type, seqid)
+        oprot.writeMessageBegin("appendEntry", msg_type, seqid)
         result.write(oprot)
         oprot.writeMessageEnd()
         oprot.trans.flush()
@@ -203,7 +203,7 @@ class Processor(Iface, TProcessor):
 # HELPER FUNCTIONS AND STRUCTURES
 
 
-class request_vote_args(object):
+class requestVote_args(object):
     """
     Attributes:
      - term
@@ -258,7 +258,7 @@ class request_vote_args(object):
         if oprot._fast_encode is not None and self.thrift_spec is not None:
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
-        oprot.writeStructBegin('request_vote_args')
+        oprot.writeStructBegin('requestVote_args')
         if self.term is not None:
             oprot.writeFieldBegin('term', TType.I32, 1)
             oprot.writeI32(self.term)
@@ -291,8 +291,8 @@ class request_vote_args(object):
 
     def __ne__(self, other):
         return not (self == other)
-all_structs.append(request_vote_args)
-request_vote_args.thrift_spec = (
+all_structs.append(requestVote_args)
+requestVote_args.thrift_spec = (
     None,  # 0
     (1, TType.I32, 'term', None, None, ),  # 1
     (2, TType.I32, 'candidate_id', None, None, ),  # 2
@@ -301,7 +301,7 @@ request_vote_args.thrift_spec = (
 )
 
 
-class request_vote_result(object):
+class requestVote_result(object):
     """
     Attributes:
      - success
@@ -336,7 +336,7 @@ class request_vote_result(object):
         if oprot._fast_encode is not None and self.thrift_spec is not None:
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
-        oprot.writeStructBegin('request_vote_result')
+        oprot.writeStructBegin('requestVote_result')
         if self.success is not None:
             oprot.writeFieldBegin('success', TType.STRUCT, 0)
             self.success.write(oprot)
@@ -357,13 +357,13 @@ class request_vote_result(object):
 
     def __ne__(self, other):
         return not (self == other)
-all_structs.append(request_vote_result)
-request_vote_result.thrift_spec = (
+all_structs.append(requestVote_result)
+requestVote_result.thrift_spec = (
     (0, TType.STRUCT, 'success', [Ballot, None], None, ),  # 0
 )
 
 
-class append_entry_args(object):
+class appendEntry_args(object):
     """
     Attributes:
      - term
@@ -433,7 +433,7 @@ class append_entry_args(object):
         if oprot._fast_encode is not None and self.thrift_spec is not None:
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
-        oprot.writeStructBegin('append_entry_args')
+        oprot.writeStructBegin('appendEntry_args')
         if self.term is not None:
             oprot.writeFieldBegin('term', TType.I32, 1)
             oprot.writeI32(self.term)
@@ -474,8 +474,8 @@ class append_entry_args(object):
 
     def __ne__(self, other):
         return not (self == other)
-all_structs.append(append_entry_args)
-append_entry_args.thrift_spec = (
+all_structs.append(appendEntry_args)
+appendEntry_args.thrift_spec = (
     None,  # 0
     (1, TType.I32, 'term', None, None, ),  # 1
     (2, TType.I32, 'leader_id', None, None, ),  # 2
@@ -486,7 +486,7 @@ append_entry_args.thrift_spec = (
 )
 
 
-class append_entry_result(object):
+class appendEntry_result(object):
     """
     Attributes:
      - success
@@ -521,7 +521,7 @@ class append_entry_result(object):
         if oprot._fast_encode is not None and self.thrift_spec is not None:
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
-        oprot.writeStructBegin('append_entry_result')
+        oprot.writeStructBegin('appendEntry_result')
         if self.success is not None:
             oprot.writeFieldBegin('success', TType.STRUCT, 0)
             self.success.write(oprot)
@@ -542,8 +542,8 @@ class append_entry_result(object):
 
     def __ne__(self, other):
         return not (self == other)
-all_structs.append(append_entry_result)
-append_entry_result.thrift_spec = (
+all_structs.append(appendEntry_result)
+appendEntry_result.thrift_spec = (
     (0, TType.STRUCT, 'success', [Response, None], None, ),  # 0
 )
 fix_spec(all_structs)
