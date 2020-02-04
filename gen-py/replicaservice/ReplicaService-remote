@@ -24,8 +24,8 @@ if len(sys.argv) <= 1 or sys.argv[1] == '--help':
     print('Usage: ' + sys.argv[0] + ' [-h host[:port]] [-u url] [-f[ramed]] [-s[sl]] [-novalidate] [-ca_certs certs] [-keyfile keyfile] [-certfile certfile] function [arg1 [arg2...]]')
     print('')
     print('Functions:')
-    print('  Ballot requestVote(i32 term, i32 candidate_id, i32 last_log_index, i32 last_log_term)')
-    print('  Response appendEntry(i32 term, i32 leader_id, i32 prev_log_index, i32 prev_log_term, Entry entry, i32 leader_commit)')
+    print('  Ballot requestVote(i32 term, ID candidateID, i32 lastLogIndex, i32 lastLogTerm)')
+    print('  Response appendEntry(i32 term, ID leaderID, i32 prevLogIndex, i32 prevLogTerm, Entry entry, i32 leaderCommit)')
     print('')
     sys.exit(0)
 

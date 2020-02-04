@@ -23,8 +23,8 @@ struct Entry {
 struct Response {
     1: bool status,
     2: i32 term,
-    3: i32 prev_log_index,
-    4: i32 number_of_entries_added
+    3: i32 prevLogIndex,
+    4: i32 numberOfEntriesAdded
 }
 
 struct Ballot {
@@ -32,17 +32,22 @@ struct Ballot {
     2: i32 term
 }
 
+struct ID {
+    1: string hostname,
+    2: i32 port
+}
+
 service ReplicaService {
 
     Ballot requestVote(1:i32 term,
-                       2:i32 candidate_id,
-                       3:i32 last_log_index,
-                       4:i32 last_log_term),
+                       2:ID candidateID,
+                       3:i32 lastLogIndex,
+                       4:i32 lastLogTerm),
 
     Response appendEntry(1:i32 term,
-                         2:i32 leader_id,
-                         3:i32 prev_log_index,
-                         4:i32 prev_log_term,
+                         2:ID leaderID,
+                         3:i32 prevLogIndex,
+                         4:i32 prevLogTerm,
                          5:Entry entry,
-                         6:i32 leader_commit)
+                         6:i32 leaderCommit)
 }

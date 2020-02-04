@@ -21,7 +21,7 @@ from locknames import LockNames
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
-from replicaservice.ttypes import Ballot, Response, Entry
+from replicaservice.ttypes import Ballot, Response, Entry, ID
 
 class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
@@ -113,6 +113,13 @@ class Replica:
 
         return membership
 
+    def _getID(self, host, port):
+        newID = ID()
+        newID.hostname = host
+        newID.port = port
+
+        return newID
+
     def _timer(self):
         sleep(7)
         while True:
@@ -129,8 +136,10 @@ class Replica:
                     protocol = TBinaryProtocol.TBinaryProtocol(transport)
                     client = ReplicaService.Client(protocol)
 
-                    ballot = client.requestVote(0, \
-                                                0, \
+                    leaderID = self._getID(self._myID[0], self._myID[1])
+
+                    ballot = client.requestVote(self._currentTerm, \
+                                                leaderID, \
                                                 0, \
                                                 0)
 

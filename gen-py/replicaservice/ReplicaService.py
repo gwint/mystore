@@ -19,26 +19,26 @@ all_structs = []
 
 
 class Iface(object):
-    def requestVote(self, term, candidate_id, last_log_index, last_log_term):
+    def requestVote(self, term, candidateID, lastLogIndex, lastLogTerm):
         """
         Parameters:
          - term
-         - candidate_id
-         - last_log_index
-         - last_log_term
+         - candidateID
+         - lastLogIndex
+         - lastLogTerm
 
         """
         pass
 
-    def appendEntry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
+    def appendEntry(self, term, leaderID, prevLogIndex, prevLogTerm, entry, leaderCommit):
         """
         Parameters:
          - term
-         - leader_id
-         - prev_log_index
-         - prev_log_term
+         - leaderID
+         - prevLogIndex
+         - prevLogTerm
          - entry
-         - leader_commit
+         - leaderCommit
 
         """
         pass
@@ -51,25 +51,25 @@ class Client(Iface):
             self._oprot = oprot
         self._seqid = 0
 
-    def requestVote(self, term, candidate_id, last_log_index, last_log_term):
+    def requestVote(self, term, candidateID, lastLogIndex, lastLogTerm):
         """
         Parameters:
          - term
-         - candidate_id
-         - last_log_index
-         - last_log_term
+         - candidateID
+         - lastLogIndex
+         - lastLogTerm
 
         """
-        self.send_requestVote(term, candidate_id, last_log_index, last_log_term)
+        self.send_requestVote(term, candidateID, lastLogIndex, lastLogTerm)
         return self.recv_requestVote()
 
-    def send_requestVote(self, term, candidate_id, last_log_index, last_log_term):
+    def send_requestVote(self, term, candidateID, lastLogIndex, lastLogTerm):
         self._oprot.writeMessageBegin('requestVote', TMessageType.CALL, self._seqid)
         args = requestVote_args()
         args.term = term
-        args.candidate_id = candidate_id
-        args.last_log_index = last_log_index
-        args.last_log_term = last_log_term
+        args.candidateID = candidateID
+        args.lastLogIndex = lastLogIndex
+        args.lastLogTerm = lastLogTerm
         args.write(self._oprot)
         self._oprot.writeMessageEnd()
         self._oprot.trans.flush()
@@ -89,29 +89,29 @@ class Client(Iface):
             return result.success
         raise TApplicationException(TApplicationException.MISSING_RESULT, "requestVote failed: unknown result")
 
-    def appendEntry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
+    def appendEntry(self, term, leaderID, prevLogIndex, prevLogTerm, entry, leaderCommit):
         """
         Parameters:
          - term
-         - leader_id
-         - prev_log_index
-         - prev_log_term
+         - leaderID
+         - prevLogIndex
+         - prevLogTerm
          - entry
-         - leader_commit
+         - leaderCommit
 
         """
-        self.send_appendEntry(term, leader_id, prev_log_index, prev_log_term, entry, leader_commit)
+        self.send_appendEntry(term, leaderID, prevLogIndex, prevLogTerm, entry, leaderCommit)
         return self.recv_appendEntry()
 
-    def send_appendEntry(self, term, leader_id, prev_log_index, prev_log_term, entry, leader_commit):
+    def send_appendEntry(self, term, leaderID, prevLogIndex, prevLogTerm, entry, leaderCommit):
         self._oprot.writeMessageBegin('appendEntry', TMessageType.CALL, self._seqid)
         args = appendEntry_args()
         args.term = term
-        args.leader_id = leader_id
-        args.prev_log_index = prev_log_index
-        args.prev_log_term = prev_log_term
+        args.leaderID = leaderID
+        args.prevLogIndex = prevLogIndex
+        args.prevLogTerm = prevLogTerm
         args.entry = entry
-        args.leader_commit = leader_commit
+        args.leaderCommit = leaderCommit
         args.write(self._oprot)
         self._oprot.writeMessageEnd()
         self._oprot.trans.flush()
@@ -160,7 +160,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = requestVote_result()
         try:
-            result.success = self._handler.requestVote(args.term, args.candidate_id, args.last_log_index, args.last_log_term)
+            result.success = self._handler.requestVote(args.term, args.candidateID, args.lastLogIndex, args.lastLogTerm)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -183,7 +183,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = appendEntry_result()
         try:
-            result.success = self._handler.appendEntry(args.term, args.leader_id, args.prev_log_index, args.prev_log_term, args.entry, args.leader_commit)
+            result.success = self._handler.appendEntry(args.term, args.leaderID, args.prevLogIndex, args.prevLogTerm, args.entry, args.leaderCommit)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -207,18 +207,18 @@ class requestVote_args(object):
     """
     Attributes:
      - term
-     - candidate_id
-     - last_log_index
-     - last_log_term
+     - candidateID
+     - lastLogIndex
+     - lastLogTerm
 
     """
 
 
-    def __init__(self, term=None, candidate_id=None, last_log_index=None, last_log_term=None,):
+    def __init__(self, term=None, candidateID=None, lastLogIndex=None, lastLogTerm=None,):
         self.term = term
-        self.candidate_id = candidate_id
-        self.last_log_index = last_log_index
-        self.last_log_term = last_log_term
+        self.candidateID = candidateID
+        self.lastLogIndex = lastLogIndex
+        self.lastLogTerm = lastLogTerm
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -235,18 +235,19 @@ class requestVote_args(object):
                 else:
                     iprot.skip(ftype)
             elif fid == 2:
-                if ftype == TType.I32:
-                    self.candidate_id = iprot.readI32()
+                if ftype == TType.STRUCT:
+                    self.candidateID = ID()
+                    self.candidateID.read(iprot)
                 else:
                     iprot.skip(ftype)
             elif fid == 3:
                 if ftype == TType.I32:
-                    self.last_log_index = iprot.readI32()
+                    self.lastLogIndex = iprot.readI32()
                 else:
                     iprot.skip(ftype)
             elif fid == 4:
                 if ftype == TType.I32:
-                    self.last_log_term = iprot.readI32()
+                    self.lastLogTerm = iprot.readI32()
                 else:
                     iprot.skip(ftype)
             else:
@@ -263,17 +264,17 @@ class requestVote_args(object):
             oprot.writeFieldBegin('term', TType.I32, 1)
             oprot.writeI32(self.term)
             oprot.writeFieldEnd()
-        if self.candidate_id is not None:
-            oprot.writeFieldBegin('candidate_id', TType.I32, 2)
-            oprot.writeI32(self.candidate_id)
+        if self.candidateID is not None:
+            oprot.writeFieldBegin('candidateID', TType.STRUCT, 2)
+            self.candidateID.write(oprot)
             oprot.writeFieldEnd()
-        if self.last_log_index is not None:
-            oprot.writeFieldBegin('last_log_index', TType.I32, 3)
-            oprot.writeI32(self.last_log_index)
+        if self.lastLogIndex is not None:
+            oprot.writeFieldBegin('lastLogIndex', TType.I32, 3)
+            oprot.writeI32(self.lastLogIndex)
             oprot.writeFieldEnd()
-        if self.last_log_term is not None:
-            oprot.writeFieldBegin('last_log_term', TType.I32, 4)
-            oprot.writeI32(self.last_log_term)
+        if self.lastLogTerm is not None:
+            oprot.writeFieldBegin('lastLogTerm', TType.I32, 4)
+            oprot.writeI32(self.lastLogTerm)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
@@ -295,9 +296,9 @@ all_structs.append(requestVote_args)
 requestVote_args.thrift_spec = (
     None,  # 0
     (1, TType.I32, 'term', None, None, ),  # 1
-    (2, TType.I32, 'candidate_id', None, None, ),  # 2
-    (3, TType.I32, 'last_log_index', None, None, ),  # 3
-    (4, TType.I32, 'last_log_term', None, None, ),  # 4
+    (2, TType.STRUCT, 'candidateID', [ID, None], None, ),  # 2
+    (3, TType.I32, 'lastLogIndex', None, None, ),  # 3
+    (4, TType.I32, 'lastLogTerm', None, None, ),  # 4
 )
 
 
@@ -367,22 +368,22 @@ class appendEntry_args(object):
     """
     Attributes:
      - term
-     - leader_id
-     - prev_log_index
-     - prev_log_term
+     - leaderID
+     - prevLogIndex
+     - prevLogTerm
      - entry
-     - leader_commit
+     - leaderCommit
 
     """
 
 
-    def __init__(self, term=None, leader_id=None, prev_log_index=None, prev_log_term=None, entry=None, leader_commit=None,):
+    def __init__(self, term=None, leaderID=None, prevLogIndex=None, prevLogTerm=None, entry=None, leaderCommit=None,):
         self.term = term
-        self.leader_id = leader_id
-        self.prev_log_index = prev_log_index
-        self.prev_log_term = prev_log_term
+        self.leaderID = leaderID
+        self.prevLogIndex = prevLogIndex
+        self.prevLogTerm = prevLogTerm
         self.entry = entry
-        self.leader_commit = leader_commit
+        self.leaderCommit = leaderCommit
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -399,18 +400,19 @@ class appendEntry_args(object):
                 else:
                     iprot.skip(ftype)
             elif fid == 2:
-                if ftype == TType.I32:
-                    self.leader_id = iprot.readI32()
+                if ftype == TType.STRUCT:
+                    self.leaderID = ID()
+                    self.leaderID.read(iprot)
                 else:
                     iprot.skip(ftype)
             elif fid == 3:
                 if ftype == TType.I32:
-                    self.prev_log_index = iprot.readI32()
+                    self.prevLogIndex = iprot.readI32()
                 else:
                     iprot.skip(ftype)
             elif fid == 4:
                 if ftype == TType.I32:
-                    self.prev_log_term = iprot.readI32()
+                    self.prevLogTerm = iprot.readI32()
                 else:
                     iprot.skip(ftype)
             elif fid == 5:
@@ -421,7 +423,7 @@ class appendEntry_args(object):
                     iprot.skip(ftype)
             elif fid == 6:
                 if ftype == TType.I32:
-                    self.leader_commit = iprot.readI32()
+                    self.leaderCommit = iprot.readI32()
                 else:
                     iprot.skip(ftype)
             else:
@@ -438,25 +440,25 @@ class appendEntry_args(object):
             oprot.writeFieldBegin('term', TType.I32, 1)
             oprot.writeI32(self.term)
             oprot.writeFieldEnd()
-        if self.leader_id is not None:
-            oprot.writeFieldBegin('leader_id', TType.I32, 2)
-            oprot.writeI32(self.leader_id)
+        if self.leaderID is not None:
+            oprot.writeFieldBegin('leaderID', TType.STRUCT, 2)
+            self.leaderID.write(oprot)
             oprot.writeFieldEnd()
-        if self.prev_log_index is not None:
-            oprot.writeFieldBegin('prev_log_index', TType.I32, 3)
-            oprot.writeI32(self.prev_log_index)
+        if self.prevLogIndex is not None:
+            oprot.writeFieldBegin('prevLogIndex', TType.I32, 3)
+            oprot.writeI32(self.prevLogIndex)
             oprot.writeFieldEnd()
-        if self.prev_log_term is not None:
-            oprot.writeFieldBegin('prev_log_term', TType.I32, 4)
-            oprot.writeI32(self.prev_log_term)
+        if self.prevLogTerm is not None:
+            oprot.writeFieldBegin('prevLogTerm', TType.I32, 4)
+            oprot.writeI32(self.prevLogTerm)
             oprot.writeFieldEnd()
         if self.entry is not None:
             oprot.writeFieldBegin('entry', TType.STRUCT, 5)
             self.entry.write(oprot)
             oprot.writeFieldEnd()
-        if self.leader_commit is not None:
-            oprot.writeFieldBegin('leader_commit', TType.I32, 6)
-            oprot.writeI32(self.leader_commit)
+        if self.leaderCommit is not None:
+            oprot.writeFieldBegin('leaderCommit', TType.I32, 6)
+            oprot.writeI32(self.leaderCommit)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
@@ -478,11 +480,11 @@ all_structs.append(appendEntry_args)
 appendEntry_args.thrift_spec = (
     None,  # 0
     (1, TType.I32, 'term', None, None, ),  # 1
-    (2, TType.I32, 'leader_id', None, None, ),  # 2
-    (3, TType.I32, 'prev_log_index', None, None, ),  # 3
-    (4, TType.I32, 'prev_log_term', None, None, ),  # 4
+    (2, TType.STRUCT, 'leaderID', [ID, None], None, ),  # 2
+    (3, TType.I32, 'prevLogIndex', None, None, ),  # 3
+    (4, TType.I32, 'prevLogTerm', None, None, ),  # 4
     (5, TType.STRUCT, 'entry', [Entry, None], None, ),  # 5
-    (6, TType.I32, 'leader_commit', None, None, ),  # 6
+    (6, TType.I32, 'leaderCommit', None, None, ),  # 6
 )
 
 
