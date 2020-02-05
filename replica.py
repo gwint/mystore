@@ -44,7 +44,8 @@ class Replica:
         self._timeout = self._getElectionTimeout()
         self._timeLeft = self._timeout
         self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
-        self._myID = ("127.0.0.1", port) #(gethostbyname(gethostname()), port)
+        self._myID = ("127.0.0.1", port)
+        self._votedFor = ()
 
         self._clusterMembership = self._getClusterMembership()
         print(self._clusterMembership)
@@ -56,7 +57,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(9)
+        self._lockHandler = LockHandler(10)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -73,12 +74,14 @@ class Replica:
 
         self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
-                                       LockNames.STATE_LOCK)
+                                       LockNames.STATE_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK)
 
 
         self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
-                                       LockNames.STATE_LOCK)
+                                       LockNames.STATE_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK)
 
         return ballot
 
@@ -136,6 +139,15 @@ class Replica:
         emptyLogEntry.term = -1
 
         return emptyLogEntry
+
+    def _isAtLeastAsUpToDateAs(self, \
+                               myLastLogIndex, \
+                               myLastLogTerm, \
+                               otherLastLogIndex, \
+                               otherLastLogTerm):
+        return (myLastLogTerm > otherLastLogTerm) or \
+                (myLastLogTerm == otherLastLogTerm and \
+                        myLastLogIndex >= otherLastLogIndex)
 
     def _timer(self):
         sleep(7)

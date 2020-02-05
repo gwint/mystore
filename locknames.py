@@ -10,3 +10,4 @@ class LockNames(IntEnum):
     MATCH_INDEX_LOCK = 6
     CONN_HANDLER_LOCK = 7
     TIMER_LOCK = 8
+    VOTED_FOR_LOCK = 9
