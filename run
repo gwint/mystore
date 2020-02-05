@@ -2,10 +2,10 @@
 
 ./replica.py 5000 &
 ./replica.py 5001 &
-#./replica.py 5002 &
+./replica.py 5002 &
 #./replica.py 5003 &
 
-sleep 15
+sleep 100
 
 pgrep replica.py | while read -r line ; do
    kill -9 $line

@@ -39,8 +39,8 @@ class Replica:
         self._log = [self._getEmptyLogEntry()]
         self._commitIndex = 0
         self._lastApplied = 0
-        self._nextIndex = []
-        self._matchIndex = []
+        self._nextIndex = {}
+        self._matchIndex = {}
         self._timeout = self._getElectionTimeout()
         self._timeLeft = self._timeout
         self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
@@ -60,28 +60,48 @@ class Replica:
         self._lockHandler = LockHandler(10)
 
         Thread(target=self._timer).start()
-        Thread(target=self._heartbeatSender).start()
+        #Thread(target=self._heartbeatSender).start()
 
     def requestVote(self, \
                     term, \
                     candidateID, \
                     lastLogIndex, \
                     lastLogTerm):
-        self._logger.debug("Someone is requesting my vote!")
-        ballot = Ballot()
-        ballot.status = False
-        ballot.term = 0
+
+        self._logger.debug(f'{(candidateID.hostname, candidateID.port)} is requesting my vote.')
+
+        ballotTerm = -1
+        voteGranted = False
 
         self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.STATE_LOCK, \
                                        LockNames.VOTED_FOR_LOCK)
 
+        if term > self._currentTerm:
+            self._state = ReplicaState.FOLLOWER
+            self._currentTerm = term
+
+        ballotTerm = self._currentTerm
+
+        if (not self._votedFor or self._votedFor == (candidateID.hostname, candidateID.port)) and \
+                self._isAtLeastAsUpToDateAs(len(self._log), \
+                                            self._log[-1].term, \
+                                            lastLogIndex, \
+                                            lastLogTerm):
+            self._logger.debug(f'Granted vote to {(candidateID.hostname, candidateID.port)}')
+            voteGranted = True
+
+        self._votedFor = (candidateID.hostname, candidateID.port)
 
         self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.STATE_LOCK, \
                                        LockNames.VOTED_FOR_LOCK)
+
+        ballot = Ballot()
+        ballot.voteGranted = voteGranted
+        ballot.term = ballotTerm
 
         return ballot
 
@@ -93,6 +113,7 @@ class Replica:
                     entry, \
                     leaderCommit):
         self._logger.debug("Someone is appending an entry to my log!")
+        self._timeout = 9999999999
         return Response()
 
     def _getElectionTimeout(self):
@@ -134,7 +155,7 @@ class Replica:
 
     def _getEmptyLogEntry(self):
         emptyLogEntry = Entry()
-        emtpyLogEntry.key = -1
+        emptyLogEntry.key = -1
         emptyLogEntry.value = -1
         emptyLogEntry.term = -1
 
@@ -150,12 +171,29 @@ class Replica:
                         myLastLogIndex >= otherLastLogIndex)
 
     def _timer(self):
-        sleep(7)
+        sleep(5)
+
         while True:
-            self._lockHandler.acquireLocks(LockNames.TIMER_LOCK)
+            self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.TIMER_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK)
+
+            if self._state == ReplicaState.LEADER:
+                self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                               LockNames.LOG_LOCK, \
+                                               LockNames.CURR_TERM_LOCK, \
+                                               LockNames.TIMER_LOCK, \
+                                               LockNames.COMMIT_INDEX_LOCK)
+                continue
 
             if self._timeLeft == 0:
                 self._logger.debug("Time has expired!")
+
+                votesReceived = 1
+                self._state = ReplicaState.CANDIDATE
+                self._currentTerm += 1
 
                 for host, port in self._clusterMembership:
                     print(f'{host}:{port}')
@@ -169,14 +207,39 @@ class Replica:
 
                     ballot = client.requestVote(self._currentTerm, \
                                                 leaderID, \
-                                                0, \
-                                                0)
+                                                len(self._log), \
+                                                self._log[-1].term)
 
-                self._lockHandler.releaseLocks(LockNames.TIMER_LOCK)
-                break
+                    votesReceived += (1 if ballot.voteGranted else 0)
+                    self._logger.debug(f'Votes received {ballot.voteGranted} now {votesReceived}')
+
+                    if votesReceived >= ((len(self._clusterMembership)+1) // 2) + 1:
+                        self._state = ReplicaState.LEADER
+
+                        for host, port in self._clusterMembership:
+                            transport = TSocket.TSocket(host, port)
+                            transport = TTransport.TBufferedTransport(transport)
+                            transport.open()
+                            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                            client = ReplicaService.Client(protocol)
+
+                            response = client.appendEntry( \
+                                 self._currentTerm, \
+                                 self._getID(self._myID[0], self._myID[1]), \
+                                 len(self._log)-1, \
+                                 self._log[-1].term, \
+                                 None, \
+                                 self._commitIndex)
+
+                        self._logger.debug("I have asserted control of the cluster!")
 
             self._timeLeft -= 1
-            self._lockHandler.releaseLocks(LockNames.TIMER_LOCK)
+
+            self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.TIMER_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK)
 
             sleep(0.001)
 
