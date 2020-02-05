@@ -46,6 +46,7 @@ class Replica:
         self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
         self._myID = ("127.0.0.1", port)
         self._votedFor = ()
+        self._leader = ()
 
         self._clusterMembership = self._getClusterMembership()
         print(self._clusterMembership)
@@ -178,14 +179,16 @@ class Replica:
                                            LockNames.LOG_LOCK, \
                                            LockNames.CURR_TERM_LOCK, \
                                            LockNames.TIMER_LOCK, \
-                                           LockNames.COMMIT_INDEX_LOCK)
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK)
 
             if self._state == ReplicaState.LEADER:
                 self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                                LockNames.LOG_LOCK, \
                                                LockNames.CURR_TERM_LOCK, \
                                                LockNames.TIMER_LOCK, \
-                                               LockNames.COMMIT_INDEX_LOCK)
+                                               LockNames.COMMIT_INDEX_LOCK, \
+                                               LockNames.VOTED_FOR_LOCK)
                 continue
 
             if self._timeLeft == 0:
@@ -193,6 +196,7 @@ class Replica:
 
                 votesReceived = 1
                 self._state = ReplicaState.CANDIDATE
+                self._votedFor = (self._myID[0], self._myID[1])
                 self._currentTerm += 1
 
                 for host, port in self._clusterMembership:
@@ -239,7 +243,8 @@ class Replica:
                                            LockNames.LOG_LOCK, \
                                            LockNames.CURR_TERM_LOCK, \
                                            LockNames.TIMER_LOCK, \
-                                           LockNames.COMMIT_INDEX_LOCK)
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK)
 
             sleep(0.001)
 
