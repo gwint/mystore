@@ -61,7 +61,7 @@ class Replica:
         self._lockHandler = LockHandler(10)
 
         Thread(target=self._timer).start()
-        #Thread(target=self._heartbeatSender).start()
+        Thread(target=self._heartbeatSender).start()
 
     def requestVote(self, \
                     term, \
@@ -113,8 +113,11 @@ class Replica:
                     prevLogTerm, \
                     entry, \
                     leaderCommit):
-        self._logger.debug("Someone is appending an entry to my log!")
-        self._timeout = 9999999999
+
+        self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry to my log.')
+        self._timeLeft = self._timeout
+        #self._votedFor = ()
+
         return Response()
 
     def _getElectionTimeout(self):
@@ -189,6 +192,7 @@ class Replica:
                                                LockNames.TIMER_LOCK, \
                                                LockNames.COMMIT_INDEX_LOCK, \
                                                LockNames.VOTED_FOR_LOCK)
+                sleep(0.5)
                 continue
 
             if self._timeLeft == 0:
@@ -197,10 +201,11 @@ class Replica:
                 votesReceived = 1
                 self._state = ReplicaState.CANDIDATE
                 self._votedFor = (self._myID[0], self._myID[1])
+                self._timeLeft = self._timeout
                 self._currentTerm += 1
 
                 for host, port in self._clusterMembership:
-                    print(f'{host}:{port}')
+                    self._logger.debug(f'{host}:{port}')
                     transport = TSocket.TSocket(host, port)
                     transport = TTransport.TBufferedTransport(transport)
                     transport.open()
@@ -232,10 +237,11 @@ class Replica:
                                  self._getID(self._myID[0], self._myID[1]), \
                                  len(self._log)-1, \
                                  self._log[-1].term, \
-                                 None, \
+                                 Entry(), \
                                  self._commitIndex)
 
                         self._logger.debug("I have asserted control of the cluster!")
+                        break
 
             self._timeLeft -= 1
 
@@ -249,8 +255,38 @@ class Replica:
             sleep(0.001)
 
     def _heartbeatSender(self):
+
         while True:
-            self._logger.debug("Now Sending a heartbeat!")
+            #self._logger.debug("Trying to acquire locks")
+            self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.STATE_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK)
+            #self._logger.debug("Actually acquired locks")
+
+            if self._state == ReplicaState.LEADER:
+                for host, port in self._clusterMembership:
+                    transport = TSocket.TSocket(host, port)
+                    transport = TTransport.TBufferedTransport(transport)
+                    transport.open()
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
+
+                    self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
+
+                    response = client.appendEntry( \
+                                 self._currentTerm, \
+                                 self._getID(self._myID[0], self._myID[1]), \
+                                 len(self._log)-1, \
+                                 self._log[-1].term, \
+                                 Entry(), \
+                                 self._commitIndex)
+
+            self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.STATE_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK)
+
             sleep(self._heartbeatTick / 1000)
 
 if __name__ == "__main__":
@@ -271,7 +307,7 @@ if __name__ == "__main__":
 
         processor = ReplicaService.Processor(replica)
 
-        server = TServer.TSimpleServer(processor, transport, tfactory, pfactory)
+        server = TServer.TThreadPoolServer(processor, transport, tfactory, pfactory)
 
         print("Now listening...")
         server.serve()
