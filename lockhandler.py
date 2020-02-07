@@ -1,5 +1,4 @@
-from threading import Lock
-from threading import get_ident
+from threading import Lock, get_ident
 
 class LockHandler:
     def __init__(self, numLocks):
@@ -10,7 +9,7 @@ class LockHandler:
         if len(args) == 0:
             raise ValueError("Must provide the name of at least one Lock")
 
-        lockNames = args
+        lockNames = sorted(args)
 
         currThreadId = get_ident()
 
@@ -23,13 +22,13 @@ class LockHandler:
             currentThreadLocks = \
                     self._perThreadAcquiredLocks.get(currThreadId, set())
 
-            if lockToAcquire in currentThreadLocks:
+            if name in currentThreadLocks:
                 raise ValueError("Thread %d has attempted to acquire lock %s, which it has previously acquired" % (currThreadId, name))
 
             if currThreadId not in self._perThreadAcquiredLocks:
                 self._perThreadAcquiredLocks[currThreadId] = set()
 
-            self._perThreadAcquiredLocks[currThreadId].add(lockToAcquire)
+            self._perThreadAcquiredLocks[currThreadId].add(name)
 
             lockToAcquire.acquire()
 
@@ -37,16 +36,14 @@ class LockHandler:
         if len(args) == 0:
             raise ValueError("The name of at least one lock must be provided when attempting to call releaseLocks")
 
-        lockNames = args
+        lockNames = sorted(args)[::-1]
 
         currThreadId = get_ident()
 
-        sortedIndices = sorted(lockNames)
-        for i in range(-1, -len(args)-1, -1):
-            nameOfLockToRelease = lockNames[i]
-            lockToRelease = self._allStoredLocks[nameOfLockToRelease]
+        for name in lockNames:
+            lockToRelease = self._allStoredLocks[name]
             lockToRelease.release()
-            self._perThreadAcquiredLocks[currThreadId].remove(lockToRelease)
+            self._perThreadAcquiredLocks[currThreadId].remove(name)
 
     def __str__(self):
         return "Lock Elements: %s" % self._locks

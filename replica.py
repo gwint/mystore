@@ -69,8 +69,6 @@ class Replica:
                     lastLogIndex, \
                     lastLogTerm):
 
-        self._logger.debug(f'{(candidateID.hostname, candidateID.port)} is requesting my vote.')
-
         ballotTerm = -1
         voteGranted = False
 
@@ -79,9 +77,12 @@ class Replica:
                                        LockNames.STATE_LOCK, \
                                        LockNames.VOTED_FOR_LOCK)
 
+        self._logger.debug(f'{self._state} {(candidateID.hostname, candidateID.port)} is requesting my vote.')
+
         if term > self._currentTerm:
             self._state = ReplicaState.FOLLOWER
             self._currentTerm = term
+            self._votedFor = ()
 
         ballotTerm = self._currentTerm
 
@@ -114,11 +115,29 @@ class Replica:
                     entry, \
                     leaderCommit):
 
-        self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry to my log.')
-        self._timeLeft = self._timeout
-        #self._votedFor = ()
+        response = Response()
+        response.status = True
 
-        return Response()
+        self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.STATE_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK)
+
+        if term <= self._currentTerm:
+            response.status = False
+
+        self._logger.debug(f'{self._state} ({leaderID.hostname}:{leaderID.port}) is appending an entry to my log.')
+
+        self._timeLeft = self._timeout
+
+        response.term = self._currentTerm
+
+        self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.STATE_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK)
+
+        return response
 
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)
@@ -192,11 +211,11 @@ class Replica:
                                                LockNames.TIMER_LOCK, \
                                                LockNames.COMMIT_INDEX_LOCK, \
                                                LockNames.VOTED_FOR_LOCK)
-                sleep(0.5)
+                sleep(0.3)
                 continue
 
             if self._timeLeft == 0:
-                self._logger.debug("Time has expired!")
+                self._logger.debug(f'{self._state} Time has expired!')
 
                 votesReceived = 1
                 self._state = ReplicaState.CANDIDATE
@@ -237,8 +256,13 @@ class Replica:
                                  self._getID(self._myID[0], self._myID[1]), \
                                  len(self._log)-1, \
                                  self._log[-1].term, \
-                                 Entry(), \
+                                 None, \
                                  self._commitIndex)
+
+                            if response.term > self._currentTerm:
+                                self._state = ReplicaState.FOLLOWER
+                                self._currentTerm = response.term
+                                self._votedFor = ()
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
@@ -252,42 +276,56 @@ class Replica:
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK)
 
-            sleep(0.001)
+            sleep(0.01)
 
     def _heartbeatSender(self):
-
         while True:
-            #self._logger.debug("Trying to acquire locks")
             self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
                                            LockNames.STATE_LOCK, \
-                                           LockNames.COMMIT_INDEX_LOCK)
-            #self._logger.debug("Actually acquired locks")
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK)
 
-            if self._state == ReplicaState.LEADER:
-                for host, port in self._clusterMembership:
-                    transport = TSocket.TSocket(host, port)
-                    transport = TTransport.TBufferedTransport(transport)
-                    transport.open()
-                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                    client = ReplicaService.Client(protocol)
+            if self._state != ReplicaState.LEADER:
+                self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
+                                               LockNames.LOG_LOCK, \
+                                               LockNames.STATE_LOCK, \
+                                               LockNames.COMMIT_INDEX_LOCK, \
+                                               LockNames.VOTED_FOR_LOCK)
+                sleep(0.5)
+                continue
 
-                    self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
+            for host, port in self._clusterMembership:
+                transport = TSocket.TSocket(host, port)
+                transport = TTransport.TBufferedTransport(transport)
+                transport.open()
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
 
-                    response = client.appendEntry( \
+                self._logger.debug(f'{self._state} Now sending a heartbeat to ({host}:{port})')
+
+                response = client.appendEntry( \
                                  self._currentTerm, \
                                  self._getID(self._myID[0], self._myID[1]), \
                                  len(self._log)-1, \
                                  self._log[-1].term, \
-                                 Entry(), \
+                                 None, \
                                  self._commitIndex)
+
+                if response.term > self._currentTerm:
+                    self._state = ReplicaState.FOLLOWER
+                    self._currentTerm = response.term
+                    self._votedFor = ()
+
 
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
                                            LockNames.STATE_LOCK, \
-                                           LockNames.COMMIT_INDEX_LOCK)
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK)
 
-            sleep(self._heartbeatTick / 1000)
+            #sleep(self._heartbeatTick / 1000)
+            sleep(0.2)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
