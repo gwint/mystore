@@ -1,21 +1,48 @@
 #!/usr/bin/python3
 
 import argparse
-from sys import argv
+from sys import argv, exit, path
+
+path.append('gen-py')
+
+from thrift.transport import TSocket
+from thrift.transport import TTransport
+from thrift.protocol import TBinaryProtocol
+from thrift.server import TServer
+
+from replicaservice import ReplicaService
+
+def killReplica(url):
+    if ':' not in url or list(url).count(':') != 1:
+        print(f'Cannot kill replica at {url}: Invalid format (should be <host>:<port>)')
+        exit(1)
+
+    host, portStr = tuple(url.split(':'))
+    port = int(portStr)
+
+    transport = TSocket.TSocket(host, port)
+    transport = TTransport.TBufferedTransport(transport)
+    transport.open()
+    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+    client = ReplicaService.Client(protocol)
+
+def listClusterMembers(isTableUsed):
+    print(f'Displaying cluster members; tableused={isTableUsed}')
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog=f'{argv[0]}')
-    subparsers = parser.add_subparsers(help='sub-command help')
+    subparsers = parser.add_subparsers(help='sub-command help', dest="command")
 
-    parser_a = subparsers.add_parser('kill', help='a help')
-    parser_a.add_argument('url', help='url help')
+    killParser = subparsers.add_parser('kill', help='kill help')
+    killParser.add_argument('url', help='url help')
 
-    parser_b = subparsers.add_parser('members', help='members help')
-    parser_b.add_argument('-table', action="store_true")
+    membersParser = subparsers.add_parser('members', help='members help')
+    membersParser.add_argument('-table', action="store_true")
 
     args = parser.parse_args()
 
-    print(args)
-
-    print(args.url)
+    if args.command == "kill":
+        killReplica(args.url)
+    elif args.command == "members":
+        listClusterMembers(args.table)
