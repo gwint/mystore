@@ -11,6 +11,7 @@ from random import randint
 from socket import gethostname, gethostbyname
 from time import sleep
 from threading import Thread
+from os import _exit
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
@@ -152,6 +153,10 @@ class Replica:
 
         return response
 
+    def kill(self):
+        self._logger.debug(f'{self._myID[0]}:{self._myID[1]} is now dying')
+        _exit(0)
+
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)
         maxTimeMS = getenv(Replica.MAX_ELECTION_TIMEOUT_ENV_VAR_NAME)
@@ -240,6 +245,7 @@ class Replica:
                     self._logger.debug(f'{host}:{port}')
                     transport = TSocket.TSocket(host, port)
                     transport = TTransport.TBufferedTransport(transport)
+
                     transport.open()
                     protocol = TBinaryProtocol.TBinaryProtocol(transport)
                     client = ReplicaService.Client(protocol)
@@ -289,7 +295,7 @@ class Replica:
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK)
 
-            sleep(0.01)
+            sleep(0.001)
 
     def _heartbeatSender(self):
         while True:
@@ -337,8 +343,7 @@ class Replica:
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK)
 
-            #sleep(self._heartbeatTick / 1000)
-            sleep(0.2)
+            sleep(self._heartbeatTick / 1000)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

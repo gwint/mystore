@@ -26,6 +26,8 @@ def killReplica(url):
     protocol = TBinaryProtocol.TBinaryProtocol(transport)
     client = ReplicaService.Client(protocol)
 
+    client.kill()
+
 def listClusterMembers(isTableUsed):
     print(f'Displaying cluster members; tableused={isTableUsed}')
 

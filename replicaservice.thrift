@@ -49,5 +49,7 @@ service ReplicaService {
                          3:i32 prevLogIndex,
                          4:i32 prevLogTerm,
                          5:Entry entry,
-                         6:i32 leaderCommit)
+                         6:i32 leaderCommit),
+
+    oneway void kill()
 }
