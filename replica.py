@@ -123,8 +123,21 @@ class Replica:
                                        LockNames.STATE_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK)
 
-        if term <= self._currentTerm:
+        if term < self._currentTerm or prevLogTerm >= len(self._log) or \
+                                self._log[prevLogIndex].term != prevLogTerm:
             response.status = False
+            response.term = max(term, self._currentTerm)
+            self._currentTerm = max(term, self._currentTerm)
+
+            self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.STATE_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK)
+            return response
+
+        self._state = ReplicaState.FOLLOWER
+
+        self._currentTerm = max(term, self._currentTerm)
 
         self._logger.debug(f'{self._state} ({leaderID.hostname}:{leaderID.port}) is appending an entry to my log.')
 
