@@ -1,3 +1,21 @@
 #!/usr/bin/python3
 
+import argparse
+from sys import argv
 
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(prog=f'{argv[0]}')
+    subparsers = parser.add_subparsers(help='sub-command help')
+
+    parser_a = subparsers.add_parser('kill', help='a help')
+    parser_a.add_argument('url', help='url help')
+
+    parser_b = subparsers.add_parser('members', help='members help')
+    parser_b.add_argument('-table', action="store_true")
+
+    args = parser.parse_args()
+
+    print(args)
+
+    print(args.url)
