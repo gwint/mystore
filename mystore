@@ -31,16 +31,29 @@ def killReplica(url):
 def listClusterMembers(isTableUsed):
     print(f'Displaying cluster members; tableused={isTableUsed}')
 
+def get(key):
+    print(f'Retrieving value associated with {key}')
+
+def put(key, value):
+    print(f'Storing {key} => {value} pair')
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog=f'{argv[0]}')
-    subparsers = parser.add_subparsers(help='sub-command help', dest="command")
+    subparsers = parser.add_subparsers(help="sub-command help", dest="command")
 
-    killParser = subparsers.add_parser('kill', help='kill help')
-    killParser.add_argument('url', help='url help')
+    killParser = subparsers.add_parser("kill", help="Used to stop a running replica")
+    killParser.add_argument("url", help="<host>:<port>")
 
-    membersParser = subparsers.add_parser('members', help='members help')
-    membersParser.add_argument('-table', action="store_true")
+    membersParser = subparsers.add_parser("members", help="Used to list state of current cluster members")
+    membersParser.add_argument("-table", action="store_true")
+
+    putParser = subparsers.add_parser("put", help="Used to create or update a key-value pair")
+    putParser.add_argument("key", help="To be used as a key for the mapping")
+    putParser.add_argument("value", help="To be used as a value for the mapping")
+
+    getParser = subparsers.add_parser("get", help="Used to read value associated with a given key")
+    getParser.add_argument("key", help="Key whose associated value will be retreived")
 
     args = parser.parse_args()
 
@@ -48,3 +61,9 @@ if __name__ == "__main__":
         killReplica(args.url)
     elif args.command == "members":
         listClusterMembers(args.table)
+    elif args.command == "put":
+        put(args.key, args.value)
+    elif args.command == "get":
+        get(args.key)
+    else:
+        parser.error("No command provided: must be one of (kill, members, put, get)")

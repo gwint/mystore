@@ -50,7 +50,6 @@ class Replica:
         self._leader = ()
 
         self._clusterMembership = self._getClusterMembership()
-        print(self._clusterMembership)
 
         self._logger = logging.getLogger(f'{self._myID}_logger')
         handler = logging.FileHandler(f'{self._myID[0]}:{self._myID[1]}.log')
@@ -207,12 +206,13 @@ class Replica:
                                myLastLogTerm, \
                                otherLastLogIndex, \
                                otherLastLogTerm):
+
         return (myLastLogTerm > otherLastLogTerm) or \
                 (myLastLogTerm == otherLastLogTerm and \
                         myLastLogIndex >= otherLastLogIndex)
 
     def _timer(self):
-        sleep(5)
+        sleep(3)
 
         while True:
             self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
@@ -263,7 +263,7 @@ class Replica:
                     except TTransport.TTransportException:
                         self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port})')
 
-                    self._logger.debug(f'Votes received {ballot.voteGranted} now {votesReceived}')
+                    self._logger.debug(f'{votesReceived} have been received during this election')
 
                     if votesReceived >= ((len(self._clusterMembership)+1) // 2) + 1:
                         self._state = ReplicaState.LEADER
@@ -336,12 +336,12 @@ class Replica:
                     self._logger.debug(f'{self._state} Now sending a heartbeat to ({host}:{port})')
 
                     response = client.appendEntry( \
-                                     self._currentTerm, \
-                                     self._getID(self._myID[0], self._myID[1]), \
-                                     len(self._log)-1, \
-                                     self._log[-1].term, \
-                                     None, \
-                                     self._commitIndex)
+                                  self._currentTerm, \
+                                  self._getID(self._myID[0], self._myID[1]), \
+                                  len(self._log)-1, \
+                                  self._log[-1].term, \
+                                  None, \
+                                  self._commitIndex)
 
                     if response.term > self._currentTerm:
                         self._state = ReplicaState.FOLLOWER
@@ -361,6 +361,7 @@ class Replica:
             sleep(self._heartbeatTick / 1000)
 
 if __name__ == "__main__":
+
     if len(sys.argv) != 2:
         print("Incorrect usage: try ./replica.py <port number>")
         sys.exit(1)
