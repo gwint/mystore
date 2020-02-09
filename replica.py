@@ -261,7 +261,7 @@ class Replica:
                         votesReceived += (1 if ballot.voteGranted else 0)
 
                     except TTransport.TTransportException:
-                        pass
+                        self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port})')
 
                     self._logger.debug(f'Votes received {ballot.voteGranted} now {votesReceived}')
 
@@ -291,7 +291,7 @@ class Replica:
                                     self._votedFor = ()
 
                             except TTransport.TTransportException:
-                                pass
+                                self._logger.debug(f'Error while attempting to send an empty appendEntry request to replica at ({host}:{port})')
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
@@ -349,7 +349,7 @@ class Replica:
                         self._votedFor = ()
 
                 except TTransport.TTransportException:
-                    pass
+                    self._logger.debug(f'Error while attempting to send an empty appendEntry request to ({host}:{port})')
 
 
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
@@ -380,7 +380,6 @@ if __name__ == "__main__":
 
         server = TServer.TThreadPoolServer(processor, transport, tfactory, pfactory)
 
-        print("Now listening...")
         server.serve()
 
     except ValueError:
