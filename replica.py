@@ -246,18 +246,23 @@ class Replica:
                     transport = TSocket.TSocket(host, port)
                     transport = TTransport.TBufferedTransport(transport)
 
-                    transport.open()
-                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                    client = ReplicaService.Client(protocol)
+                    try:
+                        transport.open()
+                        protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                        client = ReplicaService.Client(protocol)
 
-                    leaderID = self._getID(self._myID[0], self._myID[1])
+                        leaderID = self._getID(self._myID[0], self._myID[1])
 
-                    ballot = client.requestVote(self._currentTerm, \
-                                                leaderID, \
-                                                len(self._log), \
-                                                self._log[-1].term)
+                        ballot = client.requestVote(self._currentTerm, \
+                                                    leaderID, \
+                                                    len(self._log), \
+                                                    self._log[-1].term)
 
-                    votesReceived += (1 if ballot.voteGranted else 0)
+                        votesReceived += (1 if ballot.voteGranted else 0)
+
+                    except TTransport.TTransportException:
+                        pass
+
                     self._logger.debug(f'Votes received {ballot.voteGranted} now {votesReceived}')
 
                     if votesReceived >= ((len(self._clusterMembership)+1) // 2) + 1:
@@ -266,22 +271,27 @@ class Replica:
                         for host, port in self._clusterMembership:
                             transport = TSocket.TSocket(host, port)
                             transport = TTransport.TBufferedTransport(transport)
-                            transport.open()
-                            protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                            client = ReplicaService.Client(protocol)
 
-                            response = client.appendEntry( \
-                                 self._currentTerm, \
-                                 self._getID(self._myID[0], self._myID[1]), \
-                                 len(self._log)-1, \
-                                 self._log[-1].term, \
-                                 None, \
-                                 self._commitIndex)
+                            try:
+                                transport.open()
+                                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                                client = ReplicaService.Client(protocol)
 
-                            if response.term > self._currentTerm:
-                                self._state = ReplicaState.FOLLOWER
-                                self._currentTerm = response.term
-                                self._votedFor = ()
+                                response = client.appendEntry( \
+                                     self._currentTerm, \
+                                     self._getID(self._myID[0], self._myID[1]), \
+                                     len(self._log)-1, \
+                                     self._log[-1].term, \
+                                     None, \
+                                     self._commitIndex)
+
+                                if response.term > self._currentTerm:
+                                    self._state = ReplicaState.FOLLOWER
+                                    self._currentTerm = response.term
+                                    self._votedFor = ()
+
+                            except TTransport.TTransportException:
+                                pass
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
@@ -317,24 +327,29 @@ class Replica:
             for host, port in self._clusterMembership:
                 transport = TSocket.TSocket(host, port)
                 transport = TTransport.TBufferedTransport(transport)
-                transport.open()
-                protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                client = ReplicaService.Client(protocol)
 
-                self._logger.debug(f'{self._state} Now sending a heartbeat to ({host}:{port})')
+                try:
+                    transport.open()
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
 
-                response = client.appendEntry( \
-                                 self._currentTerm, \
-                                 self._getID(self._myID[0], self._myID[1]), \
-                                 len(self._log)-1, \
-                                 self._log[-1].term, \
-                                 None, \
-                                 self._commitIndex)
+                    self._logger.debug(f'{self._state} Now sending a heartbeat to ({host}:{port})')
 
-                if response.term > self._currentTerm:
-                    self._state = ReplicaState.FOLLOWER
-                    self._currentTerm = response.term
-                    self._votedFor = ()
+                    response = client.appendEntry( \
+                                     self._currentTerm, \
+                                     self._getID(self._myID[0], self._myID[1]), \
+                                     len(self._log)-1, \
+                                     self._log[-1].term, \
+                                     None, \
+                                     self._commitIndex)
+
+                    if response.term > self._currentTerm:
+                        self._state = ReplicaState.FOLLOWER
+                        self._currentTerm = response.term
+                        self._votedFor = ()
+
+                except TTransport.TTransportException:
+                    pass
 
 
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
