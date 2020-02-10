@@ -163,9 +163,59 @@ class Replica:
         _exit(0)
 
     def get(self, key):
-        self._logger.debug(f'({self._myID[0]}:{self._myID[1]}) now retrieving value associated with {key}')
+        response = GetResponse(success=True)
 
-        return GetResponse()
+        self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
+                                       LockNames.LEADER_LOCK, \
+                                       LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK)
+
+        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now retrieving value associated with {key}')
+
+        if self._state != ReplicaState.LEADER:
+            self._logger.debug(f'{self._state} Was contacted to resolve a GET but am not the leader, redirected to ({self._leader[0]}:{self._leader[1]})')
+            response.leaderID = ID(self._leader[0], self._leader[1])
+            response.success = False
+
+        for host, port in self._clusterMembership:
+            transport = TSocket.TSocket(host, port)
+            transport = TTransport.TBufferedTransport(transport)
+
+            try:
+                transport.open()
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
+
+                self._logger.debug(f'{self._state} Now sending a heartbeat to ({host}:{port})')
+
+                response = client.appendEntry( \
+                                  self._currentTerm, \
+                                  self._getID(self._myID[0], self._myID[1]), \
+                                  len(self._log)-1, \
+                                  self._log[-1].term, \
+                                  None, \
+                                  self._commitIndex)
+
+                if response.term > self._currentTerm:
+                    self._state = ReplicaState.FOLLOWER
+                    self._currentTerm = response.term
+                    self._votedFor = ()
+                    response.success = False
+                    break
+
+            except TTransport.TTransportException:
+                self._logger.debug(f'Error while attempting to send an empty appendEntry request to ({host}:{port})')
+
+        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                       LockNames.LEADER_LOCK, \
+                                       LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK)
+
+        return response
 
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)

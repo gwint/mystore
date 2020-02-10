@@ -66,9 +66,11 @@ def get(key):
             if response.success:
                 logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
                 return response.value
-
-            host = response.leaderID.hostname
-            port = response.leaderID.port
+            elif not response.leaderID:
+                host, port = getRandomReplica()
+            else:
+                host = response.leaderID.hostname
+                port = response.leaderID.port
 
         except TTransport.TTransportException:
             logger.debug(f'Experienced error while contacting ({host}:{port})')
