@@ -2,6 +2,9 @@
 
 import argparse
 from sys import argv, exit, path
+from os import getenv
+from random import randrange, seed
+import logging
 
 path.append('gen-py')
 
@@ -9,8 +12,16 @@ from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
+from dotenv import load_dotenv
 
 from replicaservice import ReplicaService
+
+logger = logging.getLogger(f'{argv[0]}_logger')
+handler = logging.FileHandler(f'{argv[0]}.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG)
 
 def killReplica(url):
     if ':' not in url or list(url).count(':') != 1:
@@ -34,10 +45,74 @@ def listClusterMembers(isTableUsed):
 def get(key):
     print(f'Retrieving value associated with {key}')
 
+    leaderInfo = getLeaderInfo()
+    if not leaderInfo:
+        leaderInfo = getRandomReplica()
+
+    host, port = leaderInfo
+
+    while True:
+        transport = TSocket.TSocket(host, port)
+        transport = TTransport.TBufferedTransport(transport)
+        try:
+            transport.open()
+            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+            client = ReplicaService.Client(protocol)
+
+            logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
+
+            response = client.get(str(key))
+
+            if response.success:
+                logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
+                return response.value
+
+            host = response.leaderID.hostname
+            port = response.leaderID.port
+
+        except TTransport.TTransportException:
+            logger.debug(f'Experienced error while contacting ({host}:{port})')
+            host, port = getRandomReplica()
+
 def put(key, value):
     print(f'Storing {key} => {value} pair')
 
+def getLeaderInfo():
+    leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')
+    leaderAddr = leaderInfoFileObj.read().strip()
+    if not leaderAddr:
+        return ()
+    if ':' not in leaderAddr or list(leaderAddr).count(':') > 1:
+        raise ValueError(f'{getenv("CURRENT_LEADER_INFO_FILE")} containing leader information is ill-formed: should have single line of the form <host>:<port>; {leaderAddr} does not comply.')
+
+    return tuple(leaderAddr.split(':'))
+
+def getRandomReplica():
+    seed()
+
+    replicaInfoFileObj = open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r')
+
+    replicaInfo = []
+
+    line = replicaInfoFileObj.readline()
+    while line:
+        line = line.strip()
+        if not line:
+            raise ValueError(f'{getenv("CLUSTER_MEMBERSHIP_FILE")} is ill-formed: each line shoudl be of the form <host>:<port>; {line} does not comply.')
+        if ':' not in line or list(line).count(':') > 1:
+            raise ValueError(f'{getenv("CLUSTER_MEMBERSHIP_FILE")} is ill-formed: the file must not be empty')
+
+        host, portStr = tuple(line.strip().split(':'))
+        port = int(portStr)
+
+        replicaInfo.append((host, port))
+
+        line = replicaInfoFileObj.readline()
+
+    return replicaInfo[randrange(len(replicaInfo))]
+
 if __name__ == "__main__":
+    load_dotenv()
 
     parser = argparse.ArgumentParser(prog=f'{argv[0]}')
     subparsers = parser.add_subparsers(help="sub-command help", dest="command")
@@ -64,6 +139,6 @@ if __name__ == "__main__":
     elif args.command == "put":
         put(args.key, args.value)
     elif args.command == "get":
-        get(args.key)
+        print(get(args.key))
     else:
         parser.error("No command provided: must be one of (kill, members, put, get)")

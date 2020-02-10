@@ -37,6 +37,15 @@ struct ID {
     2: i32 port
 }
 
+struct PutResponse {
+}
+
+struct GetResponse {
+    1: bool success,
+    2: string value,
+    3: ID leaderID
+}
+
 service ReplicaService {
 
     Ballot requestVote(1:i32 term,
@@ -50,6 +59,11 @@ service ReplicaService {
                          4:i32 prevLogTerm,
                          5:Entry entry,
                          6:i32 leaderCommit),
+
+    GetResponse get(1:string key),
+
+    PutResponse put(1:string key,
+                    2:string value),
 
     oneway void kill()
 }
