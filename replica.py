@@ -59,7 +59,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(10)
+        self._lockHandler = LockHandler(11)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -122,7 +122,8 @@ class Replica:
         self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.STATE_LOCK, \
-                                       LockNames.COMMIT_INDEX_LOCK)
+                                       LockNames.COMMIT_INDEX_LOCK,
+                                       LockNames.LEADER_LOCK)
 
         if term < self._currentTerm or prevLogTerm >= len(self._log) or \
                                 self._log[prevLogIndex].term != prevLogTerm:
@@ -133,10 +134,13 @@ class Replica:
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
                                            LockNames.STATE_LOCK, \
-                                           LockNames.COMMIT_INDEX_LOCK)
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.LEADER_LOCK)
             return response
 
         self._state = ReplicaState.FOLLOWER
+
+        self._leader = (leaderID.hostname, leaderID.port)
 
         self._currentTerm = max(term, self._currentTerm)
 
@@ -149,7 +153,8 @@ class Replica:
         self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.STATE_LOCK, \
-                                       LockNames.COMMIT_INDEX_LOCK)
+                                       LockNames.COMMIT_INDEX_LOCK, \
+                                       LockNames.LEADER_LOCK)
 
         return response
 
@@ -226,7 +231,8 @@ class Replica:
                                            LockNames.CURR_TERM_LOCK, \
                                            LockNames.TIMER_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
-                                           LockNames.VOTED_FOR_LOCK)
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.LEADER_LOCK)
 
             if self._state == ReplicaState.LEADER:
                 self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
@@ -234,7 +240,8 @@ class Replica:
                                                LockNames.CURR_TERM_LOCK, \
                                                LockNames.TIMER_LOCK, \
                                                LockNames.COMMIT_INDEX_LOCK, \
-                                               LockNames.VOTED_FOR_LOCK)
+                                               LockNames.VOTED_FOR_LOCK, \
+                                               LockNames.LEADER_LOCK)
                 sleep(0.3)
                 continue
 
@@ -273,6 +280,7 @@ class Replica:
 
                     if votesReceived >= ((len(self._clusterMembership)+1) // 2) + 1:
                         self._state = ReplicaState.LEADER
+                        self._leader = self._myID
 
                         for host, port in self._clusterMembership:
                             transport = TSocket.TSocket(host, port)
@@ -309,7 +317,8 @@ class Replica:
                                            LockNames.CURR_TERM_LOCK, \
                                            LockNames.TIMER_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
-                                           LockNames.VOTED_FOR_LOCK)
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.LEADER_LOCK)
 
             sleep(0.001)
 

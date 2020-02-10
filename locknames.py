@@ -11,3 +11,4 @@ class LockNames(IntEnum):
     CONN_HANDLER_LOCK = 7
     TIMER_LOCK = 8
     VOTED_FOR_LOCK = 9
+    LEADER_LOCK = 10
