@@ -59,7 +59,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(12)
+        self._lockHandler = LockHandler(11)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()

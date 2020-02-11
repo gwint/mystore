@@ -8,8 +8,7 @@ class LockNames(IntEnum):
     LAST_APPLIED_LOCK = 4
     NEXT_INDEX_LOCK = 5
     MATCH_INDEX_LOCK = 6
-    CONN_HANDLER_LOCK = 7
-    TIMER_LOCK = 8
-    VOTED_FOR_LOCK = 9
-    LEADER_LOCK = 10
-    MAP_LOCK = 11
+    TIMER_LOCK = 7
+    VOTED_FOR_LOCK = 8
+    LEADER_LOCK = 9
+    MAP_LOCK = 10
