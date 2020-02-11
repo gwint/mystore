@@ -94,9 +94,7 @@ class Replica:
                                             lastLogTerm):
             self._logger.debug(f'Granted vote to {(candidateID.hostname, candidateID.port)}')
             voteGranted = True
-            #self.
-
-        self._votedFor = (candidateID.hostname, candidateID.port)
+            self._votedFor = (candidateID.hostname, candidateID.port)
 
         self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
@@ -385,6 +383,8 @@ class Replica:
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
+
+                self._timeLeft = self._timeout
 
             self._timeLeft -= 1
 
