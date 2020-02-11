@@ -336,7 +336,17 @@ class ID(object):
 
 
 class PutResponse(object):
+    """
+    Attributes:
+     - success
+     - leaderID
 
+    """
+
+
+    def __init__(self, success=None, leaderID=None,):
+        self.success = success
+        self.leaderID = leaderID
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -347,6 +357,17 @@ class PutResponse(object):
             (fname, ftype, fid) = iprot.readFieldBegin()
             if ftype == TType.STOP:
                 break
+            if fid == 1:
+                if ftype == TType.I32:
+                    self.success = iprot.readI32()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 2:
+                if ftype == TType.STRUCT:
+                    self.leaderID = ID()
+                    self.leaderID.read(iprot)
+                else:
+                    iprot.skip(ftype)
             else:
                 iprot.skip(ftype)
             iprot.readFieldEnd()
@@ -357,6 +378,14 @@ class PutResponse(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('PutResponse')
+        if self.success is not None:
+            oprot.writeFieldBegin('success', TType.I32, 1)
+            oprot.writeI32(self.success)
+            oprot.writeFieldEnd()
+        if self.leaderID is not None:
+            oprot.writeFieldBegin('leaderID', TType.STRUCT, 2)
+            self.leaderID.write(oprot)
+            oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
 
@@ -482,6 +511,9 @@ ID.thrift_spec = (
 )
 all_structs.append(PutResponse)
 PutResponse.thrift_spec = (
+    None,  # 0
+    (1, TType.I32, 'success', None, None, ),  # 1
+    (2, TType.STRUCT, 'leaderID', [ID, None], None, ),  # 2
 )
 all_structs.append(GetResponse)
 GetResponse.thrift_spec = (

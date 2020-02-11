@@ -12,3 +12,4 @@ class LockNames(IntEnum):
     TIMER_LOCK = 8
     VOTED_FOR_LOCK = 9
     LEADER_LOCK = 10
+    MAP_LOCK = 11

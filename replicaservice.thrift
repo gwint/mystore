@@ -38,6 +38,8 @@ struct ID {
 }
 
 struct PutResponse {
+    1: i32 success,
+    2: ID leaderID
 }
 
 struct GetResponse {

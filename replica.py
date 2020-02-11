@@ -22,7 +22,7 @@ from locknames import LockNames
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
-from replicaservice.ttypes import Ballot, Response, Entry, ID, GetResponse
+from replicaservice.ttypes import Ballot, Response, Entry, ID, GetResponse, PutResponse
 
 class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
@@ -59,7 +59,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(11)
+        self._lockHandler = LockHandler(12)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -216,6 +216,11 @@ class Replica:
                                        LockNames.VOTED_FOR_LOCK)
 
         return response
+
+    def put(self, key, value):
+        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now associating {value} with {key} ({key} => {value})')
+
+        return PutResponse(success=True)
 
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)
