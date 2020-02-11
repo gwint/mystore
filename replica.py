@@ -94,6 +94,7 @@ class Replica:
                                             lastLogTerm):
             self._logger.debug(f'Granted vote to {(candidateID.hostname, candidateID.port)}')
             voteGranted = True
+            #self.
 
         self._votedFor = (candidateID.hostname, candidateID.port)
 
@@ -330,7 +331,7 @@ class Replica:
                 self._currentTerm += 1
 
                 for host, port in self._clusterMembership:
-                    self._logger.debug(f'{host}:{port}')
+                    self._logger.debug(f'Now requesting vote from {host}:{port}')
                     transport = TSocket.TSocket(host, port)
                     transport = TTransport.TBufferedTransport(transport)
 

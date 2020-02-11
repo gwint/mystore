@@ -46,7 +46,7 @@ class LockHandler:
             self._perThreadAcquiredLocks[currThreadId].remove(name)
 
     def __str__(self):
-        return "Lock Elements: %s" % self._locks
+        return f'Lock Elements: {self._allStoredLocks}'
 
 
 if __name__ == "__main__":

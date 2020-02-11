@@ -63,6 +63,8 @@ def get(key):
 
             if response.success:
                 logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
+                open(getenv(CURRENT_LEADER_INFO_FILE), 'w').write(f'{host}:{port}')
+
                 return response.value
             elif not response.leaderID:
                 host, port = getRandomReplica()
@@ -96,6 +98,8 @@ def put(key, value):
 
             if response.success:
                 logger.debug(f'PUT request successfully resolved: {key} => {value}')
+                open(getenv(CURRENT_LEADER_INFO_FILE), 'w').write(f'{host}:{port}')
+
                 return True
             elif not response.leaderID:
                 host, port = getRandomReplica()
