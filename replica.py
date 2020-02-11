@@ -218,9 +218,29 @@ class Replica:
         return response
 
     def put(self, key, value):
+        self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
+                                       LockNames.LEADER_LOCK, \
+                                       LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK)
+
+        response = PutResponse(success=True)
         self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now associating {value} with {key} ({key} => {value})')
 
-        return PutResponse(success=True)
+        if self._state != ReplicaState.LEADER:
+            self._logger.debug(f'{self._state} Was contacted to resolve a PUT but am not the leader, redirected to ({self._leader[0]}:{self._leader[1]})')
+            response.leaderID = ID(self._leader[0], self._leader[1])
+            response.success = False
+
+        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                       LockNames.LEADER_LOCK, \
+                                       LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK)
+
+        return response
 
     def _getElectionTimeout(self):
         minTimeMS = getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME)
