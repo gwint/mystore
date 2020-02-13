@@ -307,7 +307,9 @@ class Replica:
                                            LockNames.TIMER_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
-                                           LockNames.LEADER_LOCK)
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
 
             if self._state == ReplicaState.LEADER:
                 self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
@@ -316,7 +318,9 @@ class Replica:
                                                LockNames.TIMER_LOCK, \
                                                LockNames.COMMIT_INDEX_LOCK, \
                                                LockNames.VOTED_FOR_LOCK, \
-                                               LockNames.LEADER_LOCK)
+                                               LockNames.LEADER_LOCK, \
+                                               LockNames.NEXT_INDEX_LOCK, \
+                                               LockNames.MATCH_INDEX_LOCK)
                 sleep(0.3)
                 continue
 
@@ -361,6 +365,9 @@ class Replica:
                         self._leader = self._myID
 
                         for host, port in self._clusterMembership:
+                            self._nextIndex[(host,port)] = len(self._log)
+                            self._matchIndex[(host,port)] = 0
+
                             transport = TSocket.TSocket(host, port)
                             transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)) / 1000)
                             transport = TTransport.TBufferedTransport(transport)
@@ -401,7 +408,9 @@ class Replica:
                                            LockNames.TIMER_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
-                                           LockNames.LEADER_LOCK)
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
 
             sleep(0.001)
 
