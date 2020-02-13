@@ -8,7 +8,7 @@ import logging
 from dotenv import load_dotenv
 from os import getenv
 from random import randint
-from socket import gethostname, gethostbyname
+from socket import gethostname, gethostbyname, timeout
 from time import sleep
 from threading import Thread
 from os import _exit
@@ -29,6 +29,7 @@ class Replica:
     MAX_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MAX_MS"
     CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE"
     HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS"
+    RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS"
 
     def __init__(self, port):
         load_dotenv()
@@ -331,6 +332,7 @@ class Replica:
                 for host, port in self._clusterMembership:
                     self._logger.debug(f'Now requesting vote from {host}:{port}')
                     transport = TSocket.TSocket(host, port)
+                    transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)) / 1000)
                     transport = TTransport.TBufferedTransport(transport)
 
                     try:
@@ -349,8 +351,10 @@ class Replica:
 
                     except TTransport.TTransportException:
                         self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port})')
+                    except timeout:
+                        self._logger.debug(f'Timeout occurred while attempting request vote from ({host}:{port})')
 
-                    self._logger.debug(f'{votesReceived} have been received during this election')
+                    self._logger.debug(f'{votesReceived} votes have been received during this election')
 
                     if votesReceived >= ((len(self._clusterMembership)+1) // 2) + 1:
                         self._state = ReplicaState.LEADER
@@ -358,6 +362,7 @@ class Replica:
 
                         for host, port in self._clusterMembership:
                             transport = TSocket.TSocket(host, port)
+                            transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)) / 1000)
                             transport = TTransport.TBufferedTransport(transport)
 
                             try:
@@ -380,6 +385,8 @@ class Replica:
 
                             except TTransport.TTransportException:
                                 self._logger.debug(f'Error while attempting to send an empty appendEntry request to replica at ({host}:{port})')
+                            except timeout:
+                                self._logger.debug(f'Timeout experienced while attempting to assert control over ({host}:{port})')
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
