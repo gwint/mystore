@@ -162,7 +162,7 @@ class Replica:
         self._logger.debug(f'{self._myID[0]}:{self._myID[1]} is now dying')
         _exit(0)
 
-    def get(self, key):
+    def get(self, key, requestNumber):
         response = GetResponse(success=True)
 
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
@@ -217,7 +217,7 @@ class Replica:
 
         return response
 
-    def put(self, key, value):
+    def put(self, key, value, requestNumber):
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \

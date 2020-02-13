@@ -62,10 +62,12 @@ service ReplicaService {
                          5:Entry entry,
                          6:i32 leaderCommit),
 
-    GetResponse get(1:string key),
+    GetResponse get(1:string key,
+                    2:i32 requestNumber),
 
     PutResponse put(1:string key,
-                    2:string value),
+                    2:string value,
+                    3:i32 requestNumber),
 
     oneway void kill()
 }

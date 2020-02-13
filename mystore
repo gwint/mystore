@@ -43,6 +43,9 @@ def listClusterMembers(isTableUsed):
     print(f'Displaying cluster members; tableused={isTableUsed}')
 
 def get(key):
+    getHelper(key, 0)
+
+def getHelper(key, requestNumber):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -59,7 +62,7 @@ def get(key):
 
             logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
 
-            response = client.get(str(key))
+            response = client.get(str(key), requestNumber)
 
             if response.success:
                 logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
@@ -78,6 +81,9 @@ def get(key):
 
 def put(key, value):
     print(f'Storing {key} => {value} pair')
+    putHelper(key, value, 0)
+
+def putHelper(key, value, requestNumber):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -94,7 +100,7 @@ def put(key, value):
 
             logger.debug(f'Now contacting ({host}:{port}) to resolve PUT')
 
-            response = client.put(str(key), str(value))
+            response = client.put(str(key), str(value), requestNumber)
 
             if response.success:
                 logger.debug(f'PUT request successfully resolved: {key} => {value}')
