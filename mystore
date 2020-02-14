@@ -14,6 +14,9 @@ from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 from dotenv import load_dotenv
 
+REQUEST_IDENTIFIER_ENV_VAR_NAME = "REQUEST_ID_FILE"
+MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME = "CURRENT_LEADER_INFO_FILE"
+
 from replicaservice import ReplicaService
 
 logger = logging.getLogger(f'{argv[0]}_logger')
@@ -43,7 +46,9 @@ def listClusterMembers(isTableUsed):
     print(f'Displaying cluster members; tableused={isTableUsed}')
 
 def get(key):
-    getHelper(key, 0)
+    nextRequestIdentifier = getNextRequestIdentifier()
+    getHelper(key, nextRequestIdentifier)
+    #setNextRequestIdentifier(nextRequestIdentifier + 1)
 
 def getHelper(key, requestNumber):
     leaderInfo = getLeaderInfo()
@@ -66,9 +71,10 @@ def getHelper(key, requestNumber):
 
             if response.success:
                 logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
-                open(getenv(CURRENT_LEADER_INFO_FILE), 'w').write(f'{host}:{port}')
+                open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
 
                 return response.value
+
             elif not response.leaderID:
                 host, port = getRandomReplica()
             else:
@@ -80,8 +86,9 @@ def getHelper(key, requestNumber):
             host, port = getRandomReplica()
 
 def put(key, value):
-    print(f'Storing {key} => {value} pair')
-    putHelper(key, value, 0)
+    nextRequestIdentifier = getNextRequestIdentifier()
+    putHelper(key, value, nextRequestIdentifier)
+    #setNextRequestIdentifier(nextRequestIdentifier + 1)
 
 def putHelper(key, value, requestNumber):
     leaderInfo = getLeaderInfo()
@@ -104,9 +111,10 @@ def putHelper(key, value, requestNumber):
 
             if response.success:
                 logger.debug(f'PUT request successfully resolved: {key} => {value}')
-                open(getenv(CURRENT_LEADER_INFO_FILE), 'w').write(f'{host}:{port}')
+                open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
 
                 return True
+
             elif not response.leaderID:
                 host, port = getRandomReplica()
             else:
@@ -150,6 +158,17 @@ def getRandomReplica():
         line = replicaInfoFileObj.readline()
 
     return replicaInfo[randrange(len(replicaInfo))]
+
+def getNextRequestIdentifier():
+    nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME))
+    nextIdentifierStr = nextIdentifierFileObj.read().strip()
+
+    return int(nextIdentifierStr)
+
+def setNextRequestIdentifier(nextIdentifier):
+    nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w')
+    nextIdentifierStr = str(nextIdentifier + 1)
+    nextIdentifierFileObj.write(nextIdentifierStr)
 
 if __name__ == "__main__":
     load_dotenv()

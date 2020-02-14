@@ -22,7 +22,7 @@ from locknames import LockNames
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
-from replicaservice.ttypes import Ballot, Response, Entry, ID, GetResponse, PutResponse
+from replicaservice.ttypes import Ballot, AppendEntryResponse, Entry, ID, GetResponse, PutResponse
 
 class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
@@ -50,6 +50,7 @@ class Replica:
         self._votedFor = ()
         self._leader = ()
         self._map = {}
+        self._clientResponseCache = {}
 
         self._clusterMembership = self._getClusterMembership()
 
@@ -116,7 +117,7 @@ class Replica:
                     entry, \
                     leaderCommit):
 
-        response = Response()
+        response = AppendEntryResponse()
         response.status = True
 
         self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
@@ -172,12 +173,24 @@ class Replica:
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK)
 
-        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now retrieving value associated with {key}')
+        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now attempting to retrieve value associated with {key}')
 
         if self._state != ReplicaState.LEADER:
-            self._logger.debug(f'{self._state} Was contacted to resolve a GET but am not the leader, redirected to ({self._leader[0]}:{self._leader[1]})')
-            response.leaderID = ID(self._leader[0], self._leader[1])
+            self._logger.debug(f'{self._state} Was contacted to resolve a GET but am not the leader, redirected to ({self._leader[0] if self._leader else ""}:{self._leader[1] if self._leader else ""})')
             response.success = False
+            response.leaderID = None
+            if self._leader:
+                response.leaderID = ID(self._leader[0], self._leader[1])
+
+            self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK)
+
+            return response
+
 
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)

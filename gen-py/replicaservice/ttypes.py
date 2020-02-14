@@ -16,7 +16,7 @@ from thrift.transport import TTransport
 all_structs = []
 
 
-class Entry(object):
+class Response(object):
     """
 
     bool        Boolean, one byte
@@ -33,17 +33,91 @@ class Entry(object):
 
 
     Attributes:
-     - key
-     - value
-     - term
+     - getResponse
+     - putResponse
 
     """
 
 
-    def __init__(self, key=None, value=None, term=None,):
+    def __init__(self, getResponse=None, putResponse=None,):
+        self.getResponse = getResponse
+        self.putResponse = putResponse
+
+    def read(self, iprot):
+        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
+            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
+            return
+        iprot.readStructBegin()
+        while True:
+            (fname, ftype, fid) = iprot.readFieldBegin()
+            if ftype == TType.STOP:
+                break
+            if fid == 1:
+                if ftype == TType.STRUCT:
+                    self.getResponse = GetResponse()
+                    self.getResponse.read(iprot)
+                else:
+                    iprot.skip(ftype)
+            elif fid == 2:
+                if ftype == TType.STRUCT:
+                    self.putResponse = PutResponse()
+                    self.putResponse.read(iprot)
+                else:
+                    iprot.skip(ftype)
+            else:
+                iprot.skip(ftype)
+            iprot.readFieldEnd()
+        iprot.readStructEnd()
+
+    def write(self, oprot):
+        if oprot._fast_encode is not None and self.thrift_spec is not None:
+            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
+            return
+        oprot.writeStructBegin('Response')
+        if self.getResponse is not None:
+            oprot.writeFieldBegin('getResponse', TType.STRUCT, 1)
+            self.getResponse.write(oprot)
+            oprot.writeFieldEnd()
+        if self.putResponse is not None:
+            oprot.writeFieldBegin('putResponse', TType.STRUCT, 2)
+            self.putResponse.write(oprot)
+            oprot.writeFieldEnd()
+        oprot.writeFieldStop()
+        oprot.writeStructEnd()
+
+    def validate(self):
+        return
+
+    def __repr__(self):
+        L = ['%s=%r' % (key, value)
+             for key, value in self.__dict__.items()]
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+    def __eq__(self, other):
+        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+    def __ne__(self, other):
+        return not (self == other)
+
+
+class Entry(object):
+    """
+    Attributes:
+     - key
+     - value
+     - term
+     - clientIdentifier
+     - requestIdentifier
+
+    """
+
+
+    def __init__(self, key=None, value=None, term=None, clientIdentifier=None, requestIdentifier=None,):
         self.key = key
         self.value = value
         self.term = term
+        self.clientIdentifier = clientIdentifier
+        self.requestIdentifier = requestIdentifier
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -69,6 +143,16 @@ class Entry(object):
                     self.term = iprot.readI32()
                 else:
                     iprot.skip(ftype)
+            elif fid == 4:
+                if ftype == TType.STRING:
+                    self.clientIdentifier = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 5:
+                if ftype == TType.I32:
+                    self.requestIdentifier = iprot.readI32()
+                else:
+                    iprot.skip(ftype)
             else:
                 iprot.skip(ftype)
             iprot.readFieldEnd()
@@ -91,6 +175,14 @@ class Entry(object):
             oprot.writeFieldBegin('term', TType.I32, 3)
             oprot.writeI32(self.term)
             oprot.writeFieldEnd()
+        if self.clientIdentifier is not None:
+            oprot.writeFieldBegin('clientIdentifier', TType.STRING, 4)
+            oprot.writeString(self.clientIdentifier.encode('utf-8') if sys.version_info[0] == 2 else self.clientIdentifier)
+            oprot.writeFieldEnd()
+        if self.requestIdentifier is not None:
+            oprot.writeFieldBegin('requestIdentifier', TType.I32, 5)
+            oprot.writeI32(self.requestIdentifier)
+            oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
 
@@ -109,7 +201,7 @@ class Entry(object):
         return not (self == other)
 
 
-class Response(object):
+class AppendEntryResponse(object):
     """
     Attributes:
      - status
@@ -164,7 +256,7 @@ class Response(object):
         if oprot._fast_encode is not None and self.thrift_spec is not None:
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
-        oprot.writeStructBegin('Response')
+        oprot.writeStructBegin('AppendEntryResponse')
         if self.status is not None:
             oprot.writeFieldBegin('status', TType.BOOL, 1)
             oprot.writeBool(self.status)
@@ -482,15 +574,23 @@ class GetResponse(object):
 
     def __ne__(self, other):
         return not (self == other)
+all_structs.append(Response)
+Response.thrift_spec = (
+    None,  # 0
+    (1, TType.STRUCT, 'getResponse', [GetResponse, None], None, ),  # 1
+    (2, TType.STRUCT, 'putResponse', [PutResponse, None], None, ),  # 2
+)
 all_structs.append(Entry)
 Entry.thrift_spec = (
     None,  # 0
     (1, TType.I32, 'key', None, None, ),  # 1
     (2, TType.I32, 'value', None, None, ),  # 2
     (3, TType.I32, 'term', None, None, ),  # 3
+    (4, TType.STRING, 'clientIdentifier', 'UTF8', None, ),  # 4
+    (5, TType.I32, 'requestIdentifier', None, None, ),  # 5
 )
-all_structs.append(Response)
-Response.thrift_spec = (
+all_structs.append(AppendEntryResponse)
+AppendEntryResponse.thrift_spec = (
     None,  # 0
     (1, TType.BOOL, 'status', None, None, ),  # 1
     (2, TType.I32, 'term', None, None, ),  # 2

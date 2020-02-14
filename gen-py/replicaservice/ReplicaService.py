@@ -672,7 +672,7 @@ class appendEntry_result(object):
                 break
             if fid == 0:
                 if ftype == TType.STRUCT:
-                    self.success = Response()
+                    self.success = AppendEntryResponse()
                     self.success.read(iprot)
                 else:
                     iprot.skip(ftype)
@@ -708,7 +708,7 @@ class appendEntry_result(object):
         return not (self == other)
 all_structs.append(appendEntry_result)
 appendEntry_result.thrift_spec = (
-    (0, TType.STRUCT, 'success', [Response, None], None, ),  # 0
+    (0, TType.STRUCT, 'success', [AppendEntryResponse, None], None, ),  # 0
 )
 
 
