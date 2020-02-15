@@ -5,6 +5,7 @@ from sys import argv, exit, path
 from os import getenv
 from random import randrange, seed
 import logging
+from socket import gethostname, gethostbyname
 
 path.append('gen-py')
 
@@ -47,8 +48,9 @@ def listClusterMembers(isTableUsed):
 
 def get(key):
     nextRequestIdentifier = getNextRequestIdentifier()
-    getHelper(key, nextRequestIdentifier)
+    ret = getHelper(key, nextRequestIdentifier)
     #setNextRequestIdentifier(nextRequestIdentifier + 1)
+    return ret
 
 def getHelper(key, requestNumber):
     leaderInfo = getLeaderInfo()
@@ -87,10 +89,12 @@ def getHelper(key, requestNumber):
 
 def put(key, value):
     nextRequestIdentifier = getNextRequestIdentifier()
-    putHelper(key, value, nextRequestIdentifier)
+    hostIP = gethostbyname(gethostname())
+    ret = putHelper(key, value, hostIP, nextRequestIdentifier)
     #setNextRequestIdentifier(nextRequestIdentifier + 1)
+    return ret
 
-def putHelper(key, value, requestNumber):
+def putHelper(key, value, clientIdentifier, requestNumber):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -107,7 +111,7 @@ def putHelper(key, value, requestNumber):
 
             logger.debug(f'Now contacting ({host}:{port}) to resolve PUT')
 
-            response = client.put(str(key), str(value), requestNumber)
+            response = client.put(str(key), str(value), clientIdentifier, requestNumber)
 
             if response.success:
                 logger.debug(f'PUT request successfully resolved: {key} => {value}')

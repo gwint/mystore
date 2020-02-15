@@ -27,7 +27,7 @@ if len(sys.argv) <= 1 or sys.argv[1] == '--help':
     print('  Ballot requestVote(i32 term, ID candidateID, i32 lastLogIndex, i32 lastLogTerm)')
     print('  AppendEntryResponse appendEntry(i32 term, ID leaderID, i32 prevLogIndex, i32 prevLogTerm, Entry entry, i32 leaderCommit)')
     print('  GetResponse get(string key, i32 requestNumber)')
-    print('  PutResponse put(string key, string value, i32 requestNumber)')
+    print('  PutResponse put(string key, string value, string clientIdentifier, i32 requestIdentifier)')
     print('  void kill()')
     print('')
     sys.exit(0)
@@ -127,10 +127,10 @@ elif cmd == 'get':
     pp.pprint(client.get(args[0], eval(args[1]),))
 
 elif cmd == 'put':
-    if len(args) != 3:
-        print('put requires 3 args')
+    if len(args) != 4:
+        print('put requires 4 args')
         sys.exit(1)
-    pp.pprint(client.put(args[0], args[1], eval(args[2]),))
+    pp.pprint(client.put(args[0], args[1], args[2], eval(args[3]),))
 
 elif cmd == 'kill':
     if len(args) != 0:

@@ -230,7 +230,7 @@ class Replica:
 
         return response
 
-    def put(self, key, value, requestNumber):
+    def put(self, key, value, clientIdentifier, requestIdentifier):
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
@@ -239,12 +239,25 @@ class Replica:
                                        LockNames.VOTED_FOR_LOCK)
 
         response = PutResponse(success=True)
-        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now associating {value} with {key} ({key} => {value})')
+        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now attempting to associate {value} with {key} ({key} => {value})')
 
         if self._state != ReplicaState.LEADER:
-            self._logger.debug(f'{self._state} Was contacted to resolve a PUT but am not the leader, redirected to ({self._leader[0]}:{self._leader[1]})')
-            response.leaderID = ID(self._leader[0], self._leader[1])
+            self._logger.debug(f'{self._state} Was contacted to resolve a PUT but am not the leader, redirected to ({self._leader[0] if self._leader else ""}:{self._leader[1] if self._leader else ""})')
+            response.leaderID = None
             response.success = False
+            if self._leader:
+                response.leaderID = ID(self._leader[0], self._leader[1])
+
+            self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK)
+
+            return response
+
+        newLogEntry = Entry(key, value, self._currentTerm, clientIdentifier, requestIdentifier)
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \

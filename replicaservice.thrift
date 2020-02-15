@@ -74,7 +74,8 @@ service ReplicaService {
 
     PutResponse put(1:string key,
                     2:string value,
-                    3:i32 requestNumber),
+                    3:string clientIdentifier,
+                    4:i32 requestIdentifier),
 
     oneway void kill()
 }
