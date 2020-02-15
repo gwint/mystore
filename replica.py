@@ -51,6 +51,7 @@ class Replica:
         self._leader = ()
         self._map = {}
         self._clientResponseCache = {}
+        self._numServersReplicatedOn = 0
 
         self._clusterMembership = self._getClusterMembership()
 
@@ -61,7 +62,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(11)
+        self._lockHandler = LockHandler(12)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -236,14 +237,14 @@ class Replica:
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK)
 
         response = PutResponse(success=True)
         self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now attempting to associate {value} with {key} ({key} => {value})')
 
         if self._state != ReplicaState.LEADER:
             self._logger.debug(f'{self._state} Was contacted to resolve a PUT but am not the leader, redirected to ({self._leader[0] if self._leader else ""}:{self._leader[1] if self._leader else ""})')
-            response.leaderID = None
             response.success = False
             if self._leader:
                 response.leaderID = ID(self._leader[0], self._leader[1])
@@ -253,18 +254,48 @@ class Replica:
                                            LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
-                                           LockNames.VOTED_FOR_LOCK)
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.REPLICATION_AMOUNT_LOCK)
 
             return response
 
         newLogEntry = Entry(key, value, self._currentTerm, clientIdentifier, requestIdentifier)
+        self._log.append(newLogEntry)
+
+        for host, port in self._clusterMembership:
+            transport = TSocket.TSocket(host, port)
+            transport = TTransport.TBufferedTransport(transport)
+            transport.open()
+            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+            client = ReplicaService.Client(protocol)
+
+            response = client.appendEntry(self._currentTerm, \
+                                          self._leader, \
+                                          len(self._log)-2, \
+                                          self._log[-2].term, \
+                                          newLogEntry, \
+                                          self._commitIndex)
+
+            if response.term > self._currentTerm:
+                self._currentTerm = response.term
+                self._state = ReplicaState.FOLLOWER
+                self._votedFor = ()
+                response.success = False
+                break
+
+            if not response.success:
+                ## Try to send again
+                pass
+
+        response.leaderID = ID(self._leader[0], self._leader[1])
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK)
 
         return response
 
