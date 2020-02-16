@@ -129,13 +129,13 @@ class Entry(object):
             if ftype == TType.STOP:
                 break
             if fid == 1:
-                if ftype == TType.I32:
-                    self.key = iprot.readI32()
+                if ftype == TType.STRING:
+                    self.key = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
                 else:
                     iprot.skip(ftype)
             elif fid == 2:
-                if ftype == TType.I32:
-                    self.value = iprot.readI32()
+                if ftype == TType.STRING:
+                    self.value = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
                 else:
                     iprot.skip(ftype)
             elif fid == 3:
@@ -164,12 +164,12 @@ class Entry(object):
             return
         oprot.writeStructBegin('Entry')
         if self.key is not None:
-            oprot.writeFieldBegin('key', TType.I32, 1)
-            oprot.writeI32(self.key)
+            oprot.writeFieldBegin('key', TType.STRING, 1)
+            oprot.writeString(self.key.encode('utf-8') if sys.version_info[0] == 2 else self.key)
             oprot.writeFieldEnd()
         if self.value is not None:
-            oprot.writeFieldBegin('value', TType.I32, 2)
-            oprot.writeI32(self.value)
+            oprot.writeFieldBegin('value', TType.STRING, 2)
+            oprot.writeString(self.value.encode('utf-8') if sys.version_info[0] == 2 else self.value)
             oprot.writeFieldEnd()
         if self.term is not None:
             oprot.writeFieldBegin('term', TType.I32, 3)
@@ -204,7 +204,7 @@ class Entry(object):
 class AppendEntryResponse(object):
     """
     Attributes:
-     - status
+     - success
      - term
      - prevLogIndex
      - numberOfEntriesAdded
@@ -212,8 +212,8 @@ class AppendEntryResponse(object):
     """
 
 
-    def __init__(self, status=None, term=None, prevLogIndex=None, numberOfEntriesAdded=None,):
-        self.status = status
+    def __init__(self, success=None, term=None, prevLogIndex=None, numberOfEntriesAdded=None,):
+        self.success = success
         self.term = term
         self.prevLogIndex = prevLogIndex
         self.numberOfEntriesAdded = numberOfEntriesAdded
@@ -229,7 +229,7 @@ class AppendEntryResponse(object):
                 break
             if fid == 1:
                 if ftype == TType.BOOL:
-                    self.status = iprot.readBool()
+                    self.success = iprot.readBool()
                 else:
                     iprot.skip(ftype)
             elif fid == 2:
@@ -257,9 +257,9 @@ class AppendEntryResponse(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('AppendEntryResponse')
-        if self.status is not None:
-            oprot.writeFieldBegin('status', TType.BOOL, 1)
-            oprot.writeBool(self.status)
+        if self.success is not None:
+            oprot.writeFieldBegin('success', TType.BOOL, 1)
+            oprot.writeBool(self.success)
             oprot.writeFieldEnd()
         if self.term is not None:
             oprot.writeFieldBegin('term', TType.I32, 2)
@@ -583,8 +583,8 @@ Response.thrift_spec = (
 all_structs.append(Entry)
 Entry.thrift_spec = (
     None,  # 0
-    (1, TType.I32, 'key', None, None, ),  # 1
-    (2, TType.I32, 'value', None, None, ),  # 2
+    (1, TType.STRING, 'key', 'UTF8', None, ),  # 1
+    (2, TType.STRING, 'value', 'UTF8', None, ),  # 2
     (3, TType.I32, 'term', None, None, ),  # 3
     (4, TType.STRING, 'clientIdentifier', 'UTF8', None, ),  # 4
     (5, TType.I32, 'requestIdentifier', None, None, ),  # 5
@@ -592,7 +592,7 @@ Entry.thrift_spec = (
 all_structs.append(AppendEntryResponse)
 AppendEntryResponse.thrift_spec = (
     None,  # 0
-    (1, TType.BOOL, 'status', None, None, ),  # 1
+    (1, TType.BOOL, 'success', None, None, ),  # 1
     (2, TType.I32, 'term', None, None, ),  # 2
     (3, TType.I32, 'prevLogIndex', None, None, ),  # 3
     (4, TType.I32, 'numberOfEntriesAdded', None, None, ),  # 4

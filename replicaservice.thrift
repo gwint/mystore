@@ -20,15 +20,15 @@ union Response {
 }
 
 struct Entry {
-    1: i32 key,
-    2: i32 value,
+    1: string key,
+    2: string value,
     3: i32 term,
     4: string clientIdentifier,
     5: i32 requestIdentifier
 }
 
 struct AppendEntryResponse {
-    1: bool status,
+    1: bool success,
     2: i32 term,
     3: i32 prevLogIndex,
     4: i32 numberOfEntriesAdded

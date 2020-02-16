@@ -118,8 +118,7 @@ class Replica:
                     entry, \
                     leaderCommit):
 
-        response = AppendEntryResponse()
-        response.status = True
+        response = AppendEntryResponse(success=True)
 
         self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
@@ -127,9 +126,10 @@ class Replica:
                                        LockNames.COMMIT_INDEX_LOCK,
                                        LockNames.LEADER_LOCK)
 
-        if term < self._currentTerm or prevLogTerm >= len(self._log) or \
-                                self._log[prevLogIndex].term != prevLogTerm:
-            response.status = False
+        if (term < self._currentTerm) or \
+                                (prevLogIndex >= len(self._log)) or \
+                                (self._log[prevLogIndex].term != prevLogTerm):
+            response.success = False
             response.term = max(term, self._currentTerm)
             self._currentTerm = max(term, self._currentTerm)
 
@@ -141,6 +141,9 @@ class Replica:
             return response
 
         self._state = ReplicaState.FOLLOWER
+
+        if entry:
+            self._log.append(entry)
 
         self._leader = (leaderID.hostname, leaderID.port)
 
@@ -232,13 +235,15 @@ class Replica:
         return response
 
     def put(self, key, value, clientIdentifier, requestIdentifier):
+
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.REPLICATION_AMOUNT_LOCK)
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.NEXT_INDEX_LOCK)
 
         response = PutResponse(success=True)
         self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now attempting to associate {value} with {key} ({key} => {value})')
@@ -255,41 +260,65 @@ class Replica:
                                            LockNames.LOG_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
-                                           LockNames.REPLICATION_AMOUNT_LOCK)
+                                           LockNames.REPLICATION_AMOUNT_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK)
 
             return response
 
         newLogEntry = Entry(key, value, self._currentTerm, clientIdentifier, requestIdentifier)
         self._log.append(newLogEntry)
 
+        replicationAmount = 1
+
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
             transport = TTransport.TBufferedTransport(transport)
             transport.open()
             protocol = TBinaryProtocol.TBinaryProtocol(transport)
             client = ReplicaService.Client(protocol)
 
-            '''
-            response = client.appendEntry(self._currentTerm, \
-                                          self._leader, \
-                                          len(self._log)-2, \
-                                          self._log[-2].term, \
-                                          newLogEntry, \
-                                          self._commitIndex)
+            appendEntryResponse = client.appendEntry( \
+                                        self._currentTerm, \
+                                        ID(self._myID[0], self._myID[1]), \
+                                        len(self._log)-2, \
+                                        self._log[-2].term, \
+                                        newLogEntry, \
+                                        self._commitIndex)
 
-            if response.term > self._currentTerm:
-                self._currentTerm = response.term
+            if appendEntryResponse.term > self._currentTerm:
+                self._currentTerm = appendEntryResponse.term
                 self._state = ReplicaState.FOLLOWER
                 self._votedFor = ()
                 response.success = False
-                break
 
-            if not response.success:
-                ## Try to send again
-                pass
+                self._lockHandler.releaseLocks( \
+                                       LockNames.STATE_LOCK, \
+                                       LockNames.LEADER_LOCK, \
+                                       LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.NEXT_INDEX_LOCK)
+
+                return response
+
+            if not appendEntryResponse.success:
+                self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
+                self._nextIndex[(host,port)] -= 1
+            else:
+                self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {replicationAmount} to {replicationAmount+1})')
+                replicationAmount += 1
 
         response.leaderID = ID(self._leader[0], self._leader[1])
-        '''
+
+        if replicationAmount < (len(self._clusterMembership) + 1 // 2) + 1:
+            self._logger.debug(f'Entry unsuccessfully replicated on a majority of servers: replication amount = {replicationAmount} / {(len(self._clusterMembership) + 1 // 2) + 1}')
+            response.success = False
+        else:
+            self._logger.debug(f'Entry successfully replicated on a majority of servers and writing mapping ({key} => {value}) to the state machine')
+            self._map[key] = value
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
@@ -297,7 +326,8 @@ class Replica:
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.REPLICATION_AMOUNT_LOCK)
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.NEXT_INDEX_LOCK)
 
         return response
 
@@ -340,8 +370,8 @@ class Replica:
 
     def _getEmptyLogEntry(self):
         emptyLogEntry = Entry()
-        emptyLogEntry.key = -1
-        emptyLogEntry.value = -1
+        emptyLogEntry.key = ""
+        emptyLogEntry.value = ""
         emptyLogEntry.term = -1
 
         return emptyLogEntry
