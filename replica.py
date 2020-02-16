@@ -269,6 +269,7 @@ class Replica:
             protocol = TBinaryProtocol.TBinaryProtocol(transport)
             client = ReplicaService.Client(protocol)
 
+            '''
             response = client.appendEntry(self._currentTerm, \
                                           self._leader, \
                                           len(self._log)-2, \
@@ -288,6 +289,7 @@ class Replica:
                 pass
 
         response.leaderID = ID(self._leader[0], self._leader[1])
+        '''
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
