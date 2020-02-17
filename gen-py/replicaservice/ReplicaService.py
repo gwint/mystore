@@ -43,19 +43,22 @@ class Iface(object):
         """
         pass
 
-    def get(self, key):
+    def get(self, key, requestNumber):
         """
         Parameters:
          - key
+         - requestNumber
 
         """
         pass
 
-    def put(self, key, value):
+    def put(self, key, value, clientIdentifier, requestIdentifier):
         """
         Parameters:
          - key
          - value
+         - clientIdentifier
+         - requestIdentifier
 
         """
         pass
@@ -151,19 +154,21 @@ class Client(Iface):
             return result.success
         raise TApplicationException(TApplicationException.MISSING_RESULT, "appendEntry failed: unknown result")
 
-    def get(self, key):
+    def get(self, key, requestNumber):
         """
         Parameters:
          - key
+         - requestNumber
 
         """
-        self.send_get(key)
+        self.send_get(key, requestNumber)
         return self.recv_get()
 
-    def send_get(self, key):
+    def send_get(self, key, requestNumber):
         self._oprot.writeMessageBegin('get', TMessageType.CALL, self._seqid)
         args = get_args()
         args.key = key
+        args.requestNumber = requestNumber
         args.write(self._oprot)
         self._oprot.writeMessageEnd()
         self._oprot.trans.flush()
@@ -183,21 +188,25 @@ class Client(Iface):
             return result.success
         raise TApplicationException(TApplicationException.MISSING_RESULT, "get failed: unknown result")
 
-    def put(self, key, value):
+    def put(self, key, value, clientIdentifier, requestIdentifier):
         """
         Parameters:
          - key
          - value
+         - clientIdentifier
+         - requestIdentifier
 
         """
-        self.send_put(key, value)
+        self.send_put(key, value, clientIdentifier, requestIdentifier)
         return self.recv_put()
 
-    def send_put(self, key, value):
+    def send_put(self, key, value, clientIdentifier, requestIdentifier):
         self._oprot.writeMessageBegin('put', TMessageType.CALL, self._seqid)
         args = put_args()
         args.key = key
         args.value = value
+        args.clientIdentifier = clientIdentifier
+        args.requestIdentifier = requestIdentifier
         args.write(self._oprot)
         self._oprot.writeMessageEnd()
         self._oprot.trans.flush()
@@ -305,7 +314,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = get_result()
         try:
-            result.success = self._handler.get(args.key)
+            result.success = self._handler.get(args.key, args.requestNumber)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -328,7 +337,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = put_result()
         try:
-            result.success = self._handler.put(args.key, args.value)
+            result.success = self._handler.put(args.key, args.value, args.clientIdentifier, args.requestIdentifier)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -666,7 +675,7 @@ class appendEntry_result(object):
                 break
             if fid == 0:
                 if ftype == TType.STRUCT:
-                    self.success = Response()
+                    self.success = AppendEntryResponse()
                     self.success.read(iprot)
                 else:
                     iprot.skip(ftype)
@@ -702,7 +711,7 @@ class appendEntry_result(object):
         return not (self == other)
 all_structs.append(appendEntry_result)
 appendEntry_result.thrift_spec = (
-    (0, TType.STRUCT, 'success', [Response, None], None, ),  # 0
+    (0, TType.STRUCT, 'success', [AppendEntryResponse, None], None, ),  # 0
 )
 
 
@@ -710,12 +719,14 @@ class get_args(object):
     """
     Attributes:
      - key
+     - requestNumber
 
     """
 
 
-    def __init__(self, key=None,):
+    def __init__(self, key=None, requestNumber=None,):
         self.key = key
+        self.requestNumber = requestNumber
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -731,6 +742,11 @@ class get_args(object):
                     self.key = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
                 else:
                     iprot.skip(ftype)
+            elif fid == 2:
+                if ftype == TType.I32:
+                    self.requestNumber = iprot.readI32()
+                else:
+                    iprot.skip(ftype)
             else:
                 iprot.skip(ftype)
             iprot.readFieldEnd()
@@ -744,6 +760,10 @@ class get_args(object):
         if self.key is not None:
             oprot.writeFieldBegin('key', TType.STRING, 1)
             oprot.writeString(self.key.encode('utf-8') if sys.version_info[0] == 2 else self.key)
+            oprot.writeFieldEnd()
+        if self.requestNumber is not None:
+            oprot.writeFieldBegin('requestNumber', TType.I32, 2)
+            oprot.writeI32(self.requestNumber)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
@@ -765,6 +785,7 @@ all_structs.append(get_args)
 get_args.thrift_spec = (
     None,  # 0
     (1, TType.STRING, 'key', 'UTF8', None, ),  # 1
+    (2, TType.I32, 'requestNumber', None, None, ),  # 2
 )
 
 
@@ -835,13 +856,17 @@ class put_args(object):
     Attributes:
      - key
      - value
+     - clientIdentifier
+     - requestIdentifier
 
     """
 
 
-    def __init__(self, key=None, value=None,):
+    def __init__(self, key=None, value=None, clientIdentifier=None, requestIdentifier=None,):
         self.key = key
         self.value = value
+        self.clientIdentifier = clientIdentifier
+        self.requestIdentifier = requestIdentifier
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -862,6 +887,16 @@ class put_args(object):
                     self.value = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
                 else:
                     iprot.skip(ftype)
+            elif fid == 3:
+                if ftype == TType.STRING:
+                    self.clientIdentifier = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 4:
+                if ftype == TType.I32:
+                    self.requestIdentifier = iprot.readI32()
+                else:
+                    iprot.skip(ftype)
             else:
                 iprot.skip(ftype)
             iprot.readFieldEnd()
@@ -879,6 +914,14 @@ class put_args(object):
         if self.value is not None:
             oprot.writeFieldBegin('value', TType.STRING, 2)
             oprot.writeString(self.value.encode('utf-8') if sys.version_info[0] == 2 else self.value)
+            oprot.writeFieldEnd()
+        if self.clientIdentifier is not None:
+            oprot.writeFieldBegin('clientIdentifier', TType.STRING, 3)
+            oprot.writeString(self.clientIdentifier.encode('utf-8') if sys.version_info[0] == 2 else self.clientIdentifier)
+            oprot.writeFieldEnd()
+        if self.requestIdentifier is not None:
+            oprot.writeFieldBegin('requestIdentifier', TType.I32, 4)
+            oprot.writeI32(self.requestIdentifier)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
@@ -901,6 +944,8 @@ put_args.thrift_spec = (
     None,  # 0
     (1, TType.STRING, 'key', 'UTF8', None, ),  # 1
     (2, TType.STRING, 'value', 'UTF8', None, ),  # 2
+    (3, TType.STRING, 'clientIdentifier', 'UTF8', None, ),  # 3
+    (4, TType.I32, 'requestIdentifier', None, None, ),  # 4
 )
 
 

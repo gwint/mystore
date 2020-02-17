@@ -5,6 +5,8 @@ from sys import argv, exit, path
 from os import getenv
 from random import randrange, seed
 import logging
+from socket import gethostname, gethostbyname, timeout
+from time import sleep
 
 path.append('gen-py')
 
@@ -13,6 +15,10 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 from dotenv import load_dotenv
+
+REQUEST_IDENTIFIER_ENV_VAR_NAME = "REQUEST_ID_FILE"
+MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME = "CURRENT_LEADER_INFO_FILE"
+RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS"
 
 from replicaservice import ReplicaService
 
@@ -43,6 +49,12 @@ def listClusterMembers(isTableUsed):
     print(f'Displaying cluster members; tableused={isTableUsed}')
 
 def get(key):
+    nextRequestIdentifier = getNextRequestIdentifier()
+    ret = getHelper(key, nextRequestIdentifier)
+    #setNextRequestIdentifier(nextRequestIdentifier + 1)
+    return ret
+
+def getHelper(key, requestNumber):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -59,13 +71,14 @@ def get(key):
 
             logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
 
-            response = client.get(str(key))
+            response = client.get(str(key), requestNumber)
 
             if response.success:
                 logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
-                open(getenv(CURRENT_LEADER_INFO_FILE), 'w').write(f'{host}:{port}')
+                open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
 
                 return response.value
+
             elif not response.leaderID:
                 host, port = getRandomReplica()
             else:
@@ -77,7 +90,13 @@ def get(key):
             host, port = getRandomReplica()
 
 def put(key, value):
-    print(f'Storing {key} => {value} pair')
+    nextRequestIdentifier = getNextRequestIdentifier()
+    hostIP = gethostbyname(gethostname())
+    ret = putHelper(key, value, hostIP, nextRequestIdentifier)
+    #setNextRequestIdentifier(nextRequestIdentifier + 1)
+    return ret
+
+def putHelper(key, value, clientIdentifier, requestNumber):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -86,7 +105,9 @@ def put(key, value):
 
     while True:
         transport = TSocket.TSocket(host, port)
+        transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
         transport = TTransport.TBufferedTransport(transport)
+
         try:
             transport.open()
             protocol = TBinaryProtocol.TBinaryProtocol(transport)
@@ -94,13 +115,15 @@ def put(key, value):
 
             logger.debug(f'Now contacting ({host}:{port}) to resolve PUT')
 
-            response = client.put(str(key), str(value))
+            sleep(0.5)
+            response = client.put(str(key), str(value), clientIdentifier, requestNumber)
 
             if response.success:
                 logger.debug(f'PUT request successfully resolved: {key} => {value}')
-                open(getenv(CURRENT_LEADER_INFO_FILE), 'w').write(f'{host}:{port}')
+                open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
 
                 return True
+
             elif not response.leaderID:
                 host, port = getRandomReplica()
             else:
@@ -108,8 +131,10 @@ def put(key, value):
                 port = response.leaderID.port
 
         except TTransport.TTransportException:
-            logger.debug(f'Experienced error while contacting ({host}:{port})')
+            logger.debug(f'Experienced transport error while contacting ({host}:{port})')
             host, port = getRandomReplica()
+        except timeout:
+            logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
 
 def getLeaderInfo():
     leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')
@@ -144,6 +169,17 @@ def getRandomReplica():
         line = replicaInfoFileObj.readline()
 
     return replicaInfo[randrange(len(replicaInfo))]
+
+def getNextRequestIdentifier():
+    nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME))
+    nextIdentifierStr = nextIdentifierFileObj.read().strip()
+
+    return int(nextIdentifierStr)
+
+def setNextRequestIdentifier(nextIdentifier):
+    nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w')
+    nextIdentifierStr = str(nextIdentifier + 1)
+    nextIdentifierFileObj.write(nextIdentifierStr)
 
 if __name__ == "__main__":
     load_dotenv()

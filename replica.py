@@ -22,7 +22,7 @@ from locknames import LockNames
 from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
-from replicaservice.ttypes import Ballot, Response, Entry, ID, GetResponse, PutResponse
+from replicaservice.ttypes import Ballot, AppendEntryResponse, Entry, ID, GetResponse, PutResponse
 
 class Replica:
     MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS"
@@ -50,6 +50,8 @@ class Replica:
         self._votedFor = ()
         self._leader = ()
         self._map = {}
+        self._clientResponseCache = {}
+        self._numServersReplicatedOn = 0
 
         self._clusterMembership = self._getClusterMembership()
 
@@ -60,7 +62,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(11)
+        self._lockHandler = LockHandler(12)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -116,8 +118,7 @@ class Replica:
                     entry, \
                     leaderCommit):
 
-        response = Response()
-        response.status = True
+        response = AppendEntryResponse(success=True)
 
         self._lockHandler.acquireLocks(LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
@@ -125,9 +126,10 @@ class Replica:
                                        LockNames.COMMIT_INDEX_LOCK,
                                        LockNames.LEADER_LOCK)
 
-        if term < self._currentTerm or prevLogTerm >= len(self._log) or \
-                                self._log[prevLogIndex].term != prevLogTerm:
-            response.status = False
+        if (term < self._currentTerm) or \
+                                (prevLogIndex >= len(self._log)) or \
+                                (self._log[prevLogIndex].term != prevLogTerm):
+            response.success = False
             response.term = max(term, self._currentTerm)
             self._currentTerm = max(term, self._currentTerm)
 
@@ -139,6 +141,9 @@ class Replica:
             return response
 
         self._state = ReplicaState.FOLLOWER
+
+        if entry:
+            self._log.append(entry)
 
         self._leader = (leaderID.hostname, leaderID.port)
 
@@ -162,7 +167,7 @@ class Replica:
         self._logger.debug(f'{self._myID[0]}:{self._myID[1]} is now dying')
         _exit(0)
 
-    def get(self, key):
+    def get(self, key, requestNumber):
         response = GetResponse(success=True)
 
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
@@ -172,12 +177,24 @@ class Replica:
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK)
 
-        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now retrieving value associated with {key}')
+        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now attempting to retrieve value associated with {key}')
 
         if self._state != ReplicaState.LEADER:
-            self._logger.debug(f'{self._state} Was contacted to resolve a GET but am not the leader, redirected to ({self._leader[0]}:{self._leader[1]})')
-            response.leaderID = ID(self._leader[0], self._leader[1])
+            self._logger.debug(f'{self._state} Was contacted to resolve a GET but am not the leader, redirected to ({self._leader[0] if self._leader else ""}:{self._leader[1] if self._leader else ""})')
             response.success = False
+            response.leaderID = None
+            if self._leader:
+                response.leaderID = ID(self._leader[0], self._leader[1])
+
+            self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK)
+
+            return response
+
 
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)
@@ -217,28 +234,100 @@ class Replica:
 
         return response
 
-    def put(self, key, value):
+    def put(self, key, value, clientIdentifier, requestIdentifier):
+
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.NEXT_INDEX_LOCK)
 
         response = PutResponse(success=True)
-        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now associating {value} with {key} ({key} => {value})')
+        self._logger.debug(f'{self._state} ({self._myID[0]}:{self._myID[1]}) now attempting to associate {value} with {key} ({key} => {value})')
 
         if self._state != ReplicaState.LEADER:
-            self._logger.debug(f'{self._state} Was contacted to resolve a PUT but am not the leader, redirected to ({self._leader[0]}:{self._leader[1]})')
-            response.leaderID = ID(self._leader[0], self._leader[1])
+            self._logger.debug(f'{self._state} Was contacted to resolve a PUT but am not the leader, redirected to ({self._leader[0] if self._leader else ""}:{self._leader[1] if self._leader else ""})')
             response.success = False
+            if self._leader:
+                response.leaderID = ID(self._leader[0], self._leader[1])
+
+            self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.REPLICATION_AMOUNT_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK)
+
+            return response
+
+        newLogEntry = Entry(key, value, self._currentTerm, clientIdentifier, requestIdentifier)
+        self._log.append(newLogEntry)
+
+        replicationAmount = 1
+
+        for host, port in self._clusterMembership:
+            transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
+            transport = TTransport.TBufferedTransport(transport)
+            transport.open()
+            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+            client = ReplicaService.Client(protocol)
+
+            appendEntryResponse = client.appendEntry( \
+                                        self._currentTerm, \
+                                        ID(self._myID[0], self._myID[1]), \
+                                        len(self._log)-2, \
+                                        self._log[-2].term, \
+                                        newLogEntry, \
+                                        self._commitIndex)
+
+            if appendEntryResponse.term > self._currentTerm:
+                self._currentTerm = appendEntryResponse.term
+                self._state = ReplicaState.FOLLOWER
+                self._votedFor = ()
+                response.success = False
+
+                self._lockHandler.releaseLocks( \
+                                       LockNames.STATE_LOCK, \
+                                       LockNames.LEADER_LOCK, \
+                                       LockNames.CURR_TERM_LOCK, \
+                                       LockNames.LOG_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK, \
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.NEXT_INDEX_LOCK)
+
+                return response
+
+            if not appendEntryResponse.success:
+                self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
+                self._nextIndex[(host,port)] -= 1
+            else:
+                self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {replicationAmount} to {replicationAmount+1})')
+                replicationAmount += 1
+
+        response.leaderID = ID(self._leader[0], self._leader[1])
+
+        if replicationAmount < (len(self._clusterMembership) + 1 // 2) + 1:
+            self._logger.debug(f'Entry unsuccessfully replicated on a majority of servers: replication amount = {replicationAmount} / {(len(self._clusterMembership) + 1 // 2) + 1}')
+            response.success = False
+        else:
+            self._logger.debug(f'Entry successfully replicated on a majority of servers and writing mapping ({key} => {value}) to the state machine')
+            self._map[key] = value
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.NEXT_INDEX_LOCK)
 
         return response
 
@@ -281,8 +370,8 @@ class Replica:
 
     def _getEmptyLogEntry(self):
         emptyLogEntry = Entry()
-        emptyLogEntry.key = -1
-        emptyLogEntry.value = -1
+        emptyLogEntry.key = ""
+        emptyLogEntry.value = ""
         emptyLogEntry.term = -1
 
         return emptyLogEntry

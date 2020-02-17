@@ -14,14 +14,21 @@
  *
  */
 
-struct Entry {
-    1: i32 key
-    2: i32 value
-    3: i32 term
+union Response {
+    1: GetResponse getResponse,
+    2: PutResponse putResponse
 }
 
-struct Response {
-    1: bool status,
+struct Entry {
+    1: string key,
+    2: string value,
+    3: i32 term,
+    4: string clientIdentifier,
+    5: i32 requestIdentifier
+}
+
+struct AppendEntryResponse {
+    1: bool success,
     2: i32 term,
     3: i32 prevLogIndex,
     4: i32 numberOfEntriesAdded
@@ -55,17 +62,20 @@ service ReplicaService {
                        3:i32 lastLogIndex,
                        4:i32 lastLogTerm),
 
-    Response appendEntry(1:i32 term,
+    AppendEntryResponse appendEntry(1:i32 term,
                          2:ID leaderID,
                          3:i32 prevLogIndex,
                          4:i32 prevLogTerm,
                          5:Entry entry,
                          6:i32 leaderCommit),
 
-    GetResponse get(1:string key),
+    GetResponse get(1:string key,
+                    2:i32 requestNumber),
 
     PutResponse put(1:string key,
-                    2:string value),
+                    2:string value,
+                    3:string clientIdentifier,
+                    4:i32 requestIdentifier),
 
     oneway void kill()
 }
