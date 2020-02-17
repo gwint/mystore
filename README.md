@@ -36,15 +36,6 @@ client requests, and a set of "secondaries" which are updated by the primary.
 Also, like RAFT, each mananages a log of operations to perform.  See [this](https://docs.mongodb.com/manual/replication/) for
 more information on how MongoDB handles replication.
 
-### Protocol Buffers
-
-Protocol buffers are a language-neutral, platform-neutral, extensible way of
-serializing structured data for use in communications protocols and data storage.
-
-See the official
-[Protocol Buffers](https://developers.google.com/protocol-buffers/) website to
-learn more.
-   
 ## Additional Raft Resources
 
 - [In Search of an Understandable Consensus Algorithm](https://raft.github.io/raft.pdf)
