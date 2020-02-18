@@ -143,6 +143,7 @@ class Replica:
         if (term < self._currentTerm) or \
                                 (prevLogIndex >= len(self._log)) or \
                                 (self._log[prevLogIndex].term != prevLogTerm):
+            self._logger.debug(f'Rejecting appendEntry request from ({leaderID.hostname}:{leaderID.port})')
             response.success = False
             response.term = max(term, self._currentTerm)
             self._currentTerm = max(term, self._currentTerm)
@@ -159,16 +160,19 @@ class Replica:
         self._state = ReplicaState.FOLLOWER
 
         def applyEntry(entry):
-            if not (entry or entry.key):
+            if not (entry and entry.key):
                 return
             self._map[entry.key] = entry.value
 
-        if leaderCommit > self._lastApplied:
-            applyEntry(entry)
-            self._lastApplied += 1
-
         if entry:
             self._log.append(entry)
+
+        if leaderCommit > self._lastApplied:
+            self._logger.debug(f'Now Applying log entry ({self._log[self._lastApplied+1]}) to state machine; log = {self._log}')
+            self._lastApplied += 1
+            applyEntry(self._log[self._lastApplied])
+
+        self._logger.debug(f'Map Contents: {self._map}')
 
         self._leader = (leaderID.hostname, leaderID.port)
 
@@ -269,7 +273,8 @@ class Replica:
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.NEXT_INDEX_LOCK)
+                                       LockNames.NEXT_INDEX_LOCK, \
+                                       LockNames.LAST_APPLIED_LOCK)
 
         response = PutResponse(success=True)
         self._logger.debug(f'({self._myID[0]}:{self._myID[1]}) now attempting to associate {value} with {key} ({key} => {value})')
@@ -286,7 +291,8 @@ class Replica:
                                            LockNames.LOG_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
-                                           LockNames.NEXT_INDEX_LOCK)
+                                           LockNames.NEXT_INDEX_LOCK, \
+                                           LockNames.LAST_APPLIED_LOCK)
 
             return response
 
@@ -324,7 +330,8 @@ class Replica:
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.NEXT_INDEX_LOCK)
+                                       LockNames.NEXT_INDEX_LOCK, \
+                                       LockNames.LAST_APPLIED_LOCK)
 
                 return response
 
@@ -343,6 +350,8 @@ class Replica:
         else:
             self._logger.debug(f'Entry successfully replicated on a majority of servers and writing mapping ({key} => {value}) to the state machine')
             self._map[key] = value
+            self._commitIndex = len(self._log)-1
+            self._lastApplied = len(self._log)-1
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
@@ -350,7 +359,8 @@ class Replica:
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.NEXT_INDEX_LOCK)
+                                       LockNames.NEXT_INDEX_LOCK, \
+                                       LockNames.LAST_APPLIED_LOCK)
 
         return response
 
