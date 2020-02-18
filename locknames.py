@@ -12,4 +12,3 @@ class LockNames(IntEnum):
     VOTED_FOR_LOCK = 8
     LEADER_LOCK = 9
     MAP_LOCK = 10
-    REPLICATION_AMOUNT_LOCK = 11
