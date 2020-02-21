@@ -103,10 +103,10 @@ class Replica:
         ballotTerm = self._currentTerm
 
         if (not self._votedFor or self._votedFor == (candidateID.hostname, candidateID.port)) and \
-                self._isAtLeastAsUpToDateAs(len(self._log), \
-                                            self._log[-1].term, \
-                                            lastLogIndex, \
-                                            lastLogTerm):
+                self._isAtLeastAsUpToDateAs(lastLogIndex, \
+                                            lastLogTerm, \
+                                            len(self._log)-1, \
+                                            self._log[-1].term):
             self._logger.debug(f'Granted vote to {(candidateID.hostname, candidateID.port)}')
             voteGranted = True
             self._votedFor = (candidateID.hostname, candidateID.port)
@@ -168,11 +168,11 @@ class Replica:
             self._log.append(entry)
 
         if leaderCommit > self._lastApplied:
-            self._logger.debug(f'Now Applying log entry ({self._log[self._lastApplied+1]}) to state machine; log = {self._log}')
+            self._logger.debug(f'Now Applying log entry ({self._log[self._lastApplied+1]}) to state machine')
             self._lastApplied += 1
             applyEntry(self._log[self._lastApplied])
 
-        self._logger.debug(f'Map Contents: {self._map}')
+        self._logger.debug(f'Log Contents: {self._log}\tMap Contents: {self._map}')
 
         self._leader = (leaderID.hostname, leaderID.port)
 
@@ -342,6 +342,12 @@ class Replica:
                 self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {replicationAmount} to {replicationAmount+1})')
                 replicationAmount += 1
 
+                ###################################
+                ## MUST REMOVE: ONLY FOR TESTING ##
+                ###################################
+                if replicationAmount == 2:
+                    self.kill()
+
         response.leaderID = ID(self._leader[0], self._leader[1])
 
         if replicationAmount < (len(self._clusterMembership) + 1 // 2) + 1:
@@ -410,14 +416,14 @@ class Replica:
         return emptyLogEntry
 
     def _isAtLeastAsUpToDateAs(self, \
-                               myLastLogIndex, \
-                               myLastLogTerm, \
                                otherLastLogIndex, \
-                               otherLastLogTerm):
+                               otherLastLogTerm, \
+                               myLastLogIndex, \
+                               myLastLogTerm):
 
-        return (myLastLogTerm > otherLastLogTerm) or \
-                (myLastLogTerm == otherLastLogTerm and \
-                        myLastLogIndex >= otherLastLogIndex)
+        return (otherLastLogTerm > myLastLogTerm) or \
+                (otherLastLogTerm == myLastLogTerm and \
+                        otherLastLogIndex >= myLastLogIndex)
 
     def _timer(self):
         sleep(3)
