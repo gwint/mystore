@@ -140,6 +140,9 @@ class Replica:
                                        LockNames.MAP_LOCK, \
                                        LockNames.TIMER_LOCK)
 
+        if term >= self._currentTerm:
+            self._timeLeft = self._timeout
+
         if (term < self._currentTerm) or \
                                 (prevLogIndex >= len(self._log)) or \
                                 (self._log[prevLogIndex].term != prevLogTerm):
@@ -179,8 +182,6 @@ class Replica:
         self._currentTerm = max(term, self._currentTerm)
 
         self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry to my log.')
-
-        self._timeLeft = self._timeout
 
         response.term = self._currentTerm
 
@@ -305,48 +306,59 @@ class Replica:
             transport = TSocket.TSocket(host, port)
             transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
             transport = TTransport.TBufferedTransport(transport)
-            transport.open()
+
+            try:
+                transport.open()
+            except TTransport.TTransportException:
+                self._logger.debug(f'Error while attempting to append an entry to replica at ({host}:{port})')
+                continue
+
             protocol = TBinaryProtocol.TBinaryProtocol(transport)
             client = ReplicaService.Client(protocol)
 
-            appendEntryResponse = client.appendEntry( \
-                                        self._currentTerm, \
-                                        ID(self._myID[0], self._myID[1]), \
-                                        len(self._log)-2, \
-                                        self._log[-2].term, \
-                                        newLogEntry, \
-                                        self._commitIndex)
+            try:
+                appendEntryResponse = client.appendEntry( \
+                                            self._currentTerm, \
+                                            ID(self._myID[0], self._myID[1]), \
+                                            len(self._log)-2, \
+                                            self._log[-2].term, \
+                                            newLogEntry, \
+                                            self._commitIndex)
 
-            if appendEntryResponse.term > self._currentTerm:
-                self._currentTerm = appendEntryResponse.term
-                self._state = ReplicaState.FOLLOWER
-                self._votedFor = ()
-                response.success = False
+                if appendEntryResponse.term > self._currentTerm:
+                    self._currentTerm = appendEntryResponse.term
+                    self._state = ReplicaState.FOLLOWER
+                    self._votedFor = ()
+                    response.success = False
 
-                self._lockHandler.releaseLocks( \
-                                       LockNames.STATE_LOCK, \
-                                       LockNames.LEADER_LOCK, \
-                                       LockNames.CURR_TERM_LOCK, \
-                                       LockNames.LOG_LOCK, \
-                                       LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.NEXT_INDEX_LOCK, \
-                                       LockNames.LAST_APPLIED_LOCK)
+                    self._lockHandler.releaseLocks( \
+                                           LockNames.STATE_LOCK, \
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK, \
+                                           LockNames.LAST_APPLIED_LOCK)
 
-                return response
+                    return response
 
-            if not appendEntryResponse.success:
-                self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
-                self._nextIndex[(host,port)] -= 1
-            else:
-                self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {replicationAmount} to {replicationAmount+1})')
-                replicationAmount += 1
+                if not appendEntryResponse.success:
+                    self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
+                    self._nextIndex[(host,port)] -= 1
+                else:
+                    self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {replicationAmount} to {replicationAmount+1})')
+                    replicationAmount += 1
 
-                ###################################
-                ## MUST REMOVE: ONLY FOR TESTING ##
-                ###################################
-                if replicationAmount == 2:
-                    self.kill()
+                    ###################################
+                    ## MUST REMOVE: ONLY FOR TESTING ##
+                    ###################################
+                    if replicationAmount == 2:
+                        self.kill()
+
+            except timeout:
+                self._logger.debug(f'Timeout occurred while attempting to append entry to replica at ({host}:{port})')
+                continue
 
         response.leaderID = ID(self._leader[0], self._leader[1])
 
