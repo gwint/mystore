@@ -146,7 +146,7 @@ class Replica:
         if (term < self._currentTerm) or \
                                 (prevLogIndex >= len(self._log)) or \
                                 (self._log[prevLogIndex].term != prevLogTerm):
-            self._logger.debug(f'Rejecting appendEntry request from ({leaderID.hostname}:{leaderID.port})')
+            self._logger.debug(f'Rejecting appendEntry request from ({leaderID.hostname}:{leaderID.port}); leaderterm={term}, myterm={self._currentTerm}, prevLogIndex={prevLogIndex}')
             response.success = False
             response.term = max(term, self._currentTerm)
             self._currentTerm = max(term, self._currentTerm)
@@ -348,13 +348,8 @@ class Replica:
                     self._nextIndex[(host,port)] -= 1
                 else:
                     self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {replicationAmount} to {replicationAmount+1})')
+                    self._nextIndex[(host,port)] += 1
                     replicationAmount += 1
-
-                    ###################################
-                    ## MUST REMOVE: ONLY FOR TESTING ##
-                    ###################################
-                    if replicationAmount == 2:
-                        self.kill()
 
             except timeout:
                 self._logger.debug(f'Timeout occurred while attempting to append entry to replica at ({host}:{port})')
@@ -560,20 +555,34 @@ class Replica:
                                            LockNames.LOG_LOCK, \
                                            LockNames.STATE_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
-                                           LockNames.VOTED_FOR_LOCK)
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK)
 
             if self._state != ReplicaState.LEADER:
                 self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                                LockNames.LOG_LOCK, \
                                                LockNames.STATE_LOCK, \
                                                LockNames.COMMIT_INDEX_LOCK, \
-                                               LockNames.VOTED_FOR_LOCK)
+                                               LockNames.VOTED_FOR_LOCK, \
+                                               LockNames.NEXT_INDEX_LOCK)
                 sleep(0.5)
                 continue
 
             for host, port in self._clusterMembership:
                 transport = TSocket.TSocket(host, port)
                 transport = TTransport.TBufferedTransport(transport)
+
+                #####################################################
+                ########## New Addition - may be removed ############
+                #####################################################
+                entryToSend = None
+                prevLogIndex = len(self._log)-1
+                prevLogTerm = self._log[-1].term
+                if self._nextIndex[(host, port)] < len(self._log):
+                    logIndexToSend = self._nextIndex[(host, port)]
+                    entryToSend = self._log[logIndexToSend]
+                    prevLogIndex = logIndexToSend-1
+                    prevLogTerm = self._log[prevLogIndex].term
 
                 try:
                     transport.open()
@@ -582,18 +591,28 @@ class Replica:
 
                     self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
 
-                    response = client.appendEntry( \
+                    appendEntryResponse = client.appendEntry( \
                                   self._currentTerm, \
                                   self._getID(self._myID[0], self._myID[1]), \
-                                  len(self._log)-1, \
-                                  self._log[-1].term, \
-                                  None, \
+                                  prevLogIndex, \
+                                  prevLogTerm, \
+                                  entryToSend, \
                                   self._commitIndex)
 
-                    if response.term > self._currentTerm:
+                    if appendEntryResponse.term > self._currentTerm:
                         self._state = ReplicaState.FOLLOWER
                         self._currentTerm = response.term
                         self._votedFor = ()
+                        break
+
+                    if not appendEntryResponse.success:
+                        self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
+                        self._nextIndex[(host,port)] = max(0, self._nextIndex[(host,port)] - 1)
+                    elif entryToSend:
+                        self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) successful: Increasing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]+1}')
+                        self._nextIndex[(host,port)] += 1
+                    else:
+                        self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')
 
                 except TTransport.TTransportException:
                     self._logger.debug(f'Error while attempting to send an empty appendEntry request to ({host}:{port})')
@@ -603,7 +622,8 @@ class Replica:
                                            LockNames.LOG_LOCK, \
                                            LockNames.STATE_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
-                                           LockNames.VOTED_FOR_LOCK)
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK)
 
             sleep(self._heartbeatTick / 1000)
 
