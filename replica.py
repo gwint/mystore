@@ -66,7 +66,7 @@ class Replica:
 
         self._logger = logging.getLogger(f'{self._myID}_logger')
         handler = logging.FileHandler(f'{self._myID[0]}:{self._myID[1]}.log')
-        formatter = ReplicaFormatter('%(state)s %(asctime)s %(levelname)s %(message)s', self)
+        formatter = ReplicaFormatter('%(state)s %(asctime)s %(message)s', self)
         handler.setFormatter(formatter)
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
@@ -589,8 +589,6 @@ class Replica:
                     protocol = TBinaryProtocol.TBinaryProtocol(transport)
                     client = ReplicaService.Client(protocol)
 
-                    self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
-
                     appendEntryResponse = client.appendEntry( \
                                   self._currentTerm, \
                                   self._getID(self._myID[0], self._myID[1]), \
@@ -615,7 +613,7 @@ class Replica:
                         self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')
 
                 except TTransport.TTransportException:
-                    self._logger.debug(f'Error while attempting to send an empty appendEntry request to ({host}:{port})')
+                    self._logger.debug(f'Error while attempting to send an appendEntry request to ({host}:{port}) from heartbeatSender')
 
 
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
