@@ -31,6 +31,8 @@ class ReplicaFormatter(logging.Formatter):
 
     def format(self, record):
         record.state = self._replica.getState()
+        record.term = self._replica.getTerm()
+        record.log = self._replica.getLog()
         return super(ReplicaFormatter, self).format(record)
 
 class Replica:
@@ -66,7 +68,7 @@ class Replica:
 
         self._logger = logging.getLogger(f'{self._myID}_logger')
         handler = logging.FileHandler(f'{self._myID[0]}:{self._myID[1]}.log')
-        formatter = ReplicaFormatter('%(state)s %(asctime)s %(message)s', self)
+        formatter = ReplicaFormatter('%(term)s %(state)s %(asctime)s %(message)s %(log)s', self)
         handler.setFormatter(formatter)
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
@@ -78,6 +80,16 @@ class Replica:
 
     def getState(self):
         return self._state
+
+    def getTerm(self):
+        return self._currentTerm
+
+    def getLog(self):
+        printableLog = []
+        for entry in self._log:
+            printableLog.append(str((entry.key, entry.value, entry.term, entry.clientIdentifier, entry.requestIdentifier)))
+
+        return str(printableLog)
 
     def requestVote(self, \
                     term, \
@@ -357,11 +369,17 @@ class Replica:
 
         response.leaderID = ID(self._leader[0], self._leader[1])
 
-        if replicationAmount < (len(self._clusterMembership) + 1 // 2) + 1:
+        if replicationAmount < ((len(self._clusterMembership) + 1) // 2) + 1:
             self._logger.debug(f'Entry unsuccessfully replicated on a majority of servers: replication amount = {replicationAmount} / {(len(self._clusterMembership) + 1 // 2) + 1}')
             response.success = False
         else:
             self._logger.debug(f'Entry successfully replicated on a majority of servers and writing mapping ({key} => {value}) to the state machine')
+
+            ##################################################
+            #### MUST REMOVE - FOR TESTING PURPOSES ONLY #####
+            ##################################################
+            self.kill()
+
             self._map[key] = value
             self._commitIndex = len(self._log)-1
             self._lastApplied = len(self._log)-1
@@ -572,9 +590,6 @@ class Replica:
                 transport = TSocket.TSocket(host, port)
                 transport = TTransport.TBufferedTransport(transport)
 
-                #####################################################
-                ########## New Addition - may be removed ############
-                #####################################################
                 entryToSend = None
                 prevLogIndex = len(self._log)-1
                 prevLogTerm = self._log[-1].term
@@ -608,6 +623,7 @@ class Replica:
                         self._nextIndex[(host,port)] = max(0, self._nextIndex[(host,port)] - 1)
                     elif entryToSend:
                         self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) successful: Increasing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]+1}')
+                        self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
                         self._nextIndex[(host,port)] += 1
                     else:
                         self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')

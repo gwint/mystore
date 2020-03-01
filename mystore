@@ -85,7 +85,7 @@ def getHelper(key, requestNumber):
                 host = response.leaderID.hostname
                 port = response.leaderID.port
 
-        except TTransport.TTransportException:
+        except TTransport.TTransportException as e:
             logger.debug(f'Experienced error while contacting ({host}:{port})')
             host, port = getRandomReplica()
 
@@ -130,7 +130,7 @@ def putHelper(key, value, clientIdentifier, requestNumber):
                 host = response.leaderID.hostname
                 port = response.leaderID.port
 
-        except TTransport.TTransportException:
+        except TTransport.TTransportException as e:
             logger.debug(f'Experienced transport error while contacting ({host}:{port})')
             host, port = getRandomReplica()
         except timeout:
