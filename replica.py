@@ -33,6 +33,7 @@ class ReplicaFormatter(logging.Formatter):
         record.state = self._replica.getState()
         record.term = self._replica.getTerm()
         record.log = self._replica.getLog()
+        record.map = self._replica.getMap()
         return super(ReplicaFormatter, self).format(record)
 
 class Replica:
@@ -63,17 +64,18 @@ class Replica:
         self._map = {}
         self._clientResponseCache = {}
         self._numServersReplicatedOn = 0
+        self._currentRequestBeingServiced = 0
 
         self._clusterMembership = self._getClusterMembership()
 
         self._logger = logging.getLogger(f'{self._myID}_logger')
         handler = logging.FileHandler(f'{self._myID[0]}:{self._myID[1]}.log')
-        formatter = ReplicaFormatter('%(term)s %(state)s %(asctime)s %(message)s %(log)s', self)
+        formatter = ReplicaFormatter('%(term)s %(state)s %(asctime)s %(message)s %(log)s %(map)s', self)
         handler.setFormatter(formatter)
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(11)
+        self._lockHandler = LockHandler(13)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -87,9 +89,12 @@ class Replica:
     def getLog(self):
         printableLog = []
         for entry in self._log:
-            printableLog.append(str((entry.key, entry.value, entry.term, entry.clientIdentifier, entry.requestIdentifier)))
+            printableLog.append((entry.key, entry.value, entry.term, entry.clientIdentifier, entry.requestIdentifier))
 
         return str(printableLog)
+
+    def getMap(self):
+        return str(self._map)
 
     def requestVote(self, \
                     term, \
@@ -186,8 +191,6 @@ class Replica:
             self._logger.debug(f'Now Applying log entry ({self._log[self._lastApplied+1]}) to state machine')
             self._lastApplied += 1
             applyEntry(self._log[self._lastApplied])
-
-        self._logger.debug(f'Log Contents: {self._log}\tMap Contents: {self._map}')
 
         self._leader = (leaderID.hostname, leaderID.port)
 
@@ -287,7 +290,8 @@ class Replica:
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
                                        LockNames.NEXT_INDEX_LOCK, \
-                                       LockNames.LAST_APPLIED_LOCK)
+                                       LockNames.LAST_APPLIED_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK)
 
         response = PutResponse(success=True)
         self._logger.debug(f'({self._myID[0]}:{self._myID[1]}) now attempting to associate {value} with {key} ({key} => {value})')
@@ -305,14 +309,15 @@ class Replica:
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
                                            LockNames.NEXT_INDEX_LOCK, \
-                                           LockNames.LAST_APPLIED_LOCK)
+                                           LockNames.LAST_APPLIED_LOCK, \
+                                           LockNames.REPLICATION_AMOUNT_LOCK)
 
             return response
 
         newLogEntry = Entry(key, value, self._currentTerm, clientIdentifier, requestIdentifier)
         self._log.append(newLogEntry)
 
-        replicationAmount = 1
+        self._numServersReplicatedOn = 1
 
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)
@@ -351,7 +356,8 @@ class Replica:
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
                                            LockNames.NEXT_INDEX_LOCK, \
-                                           LockNames.LAST_APPLIED_LOCK)
+                                           LockNames.LAST_APPLIED_LOCK, \
+                                           LockNames.REPLICATION_AMOUNT_LOCK)
 
                     return response
 
@@ -359,9 +365,9 @@ class Replica:
                     self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
                     self._nextIndex[(host,port)] -= 1
                 else:
-                    self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {replicationAmount} to {replicationAmount+1})')
+                    self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {self._numServersReplicatedOn} to {self._numServersReplicatedOn+1})')
                     self._nextIndex[(host,port)] += 1
-                    replicationAmount += 1
+                    self._numServersReplicatedOn += 1
 
             except timeout:
                 self._logger.debug(f'Timeout occurred while attempting to append entry to replica at ({host}:{port})')
@@ -369,16 +375,11 @@ class Replica:
 
         response.leaderID = ID(self._leader[0], self._leader[1])
 
-        if replicationAmount < ((len(self._clusterMembership) + 1) // 2) + 1:
-            self._logger.debug(f'Entry unsuccessfully replicated on a majority of servers: replication amount = {replicationAmount} / {(len(self._clusterMembership) + 1 // 2) + 1}')
+        if self._numServersReplicatedOn < ((len(self._clusterMembership) + 1) // 2) + 1:
+            self._logger.debug(f'Entry unsuccessfully replicated on a majority of servers: replication amount = {self._numServersReplicatedOn} / {(len(self._clusterMembership) + 1 // 2) + 1}')
             response.success = False
         else:
             self._logger.debug(f'Entry successfully replicated on a majority of servers and writing mapping ({key} => {value}) to the state machine')
-
-            ##################################################
-            #### MUST REMOVE - FOR TESTING PURPOSES ONLY #####
-            ##################################################
-            self.kill()
 
             self._map[key] = value
             self._commitIndex = len(self._log)-1
@@ -391,7 +392,8 @@ class Replica:
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
                                        LockNames.NEXT_INDEX_LOCK, \
-                                       LockNames.LAST_APPLIED_LOCK)
+                                       LockNames.LAST_APPLIED_LOCK, \
+                                       LockNames.REPLICATION_AMOUNT_LOCK)
 
         return response
 
