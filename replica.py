@@ -26,8 +26,7 @@ from replicaservice import ReplicaService
 from replicaservice.ttypes import Ballot, AppendEntryResponse, Entry, ID, GetResponse, PutResponse
 
 class Job:
-    def __init__(self, entry=None, entryPosition=None, targetHost=None, targetPort=None):
-        self.entry = entry
+    def __init__(self, entryPosition=None, targetHost=None, targetPort=None):
         self.entryPosition = entryPosition
         self.targetHost = targetHost
         self.targetPort = targetPort
@@ -402,7 +401,7 @@ class Replica:
             except TTransport.TTransportException as e:
                 if isinstance(e.inner, timeout):
                     self._logger.debug(f'Timeout occurred while attempting to append entry to replica at ({host}:{port})')
-                    self._jobsToRetry.put(Job(newLogEntry, len(self._log)-1, host, port))
+                    self._jobsToRetry.put(Job(len(self._log)-1, host, port))
                     continue
 
                 raise e
@@ -507,7 +506,10 @@ class Replica:
                                                LockNames.CURR_TERM_LOCK, \
                                                LockNames.VOTED_FOR_LOCK, \
                                                LockNames.NEXT_INDEX_LOCK, \
-                                               LockNames.MATCH_INDEX_LOCK)
+                                               LockNames.MATCH_INDEX_LOCK, \
+                                               LockNames.LOG_LOCK)
+
+                entry = self._log[job.entryPosition]
 
                 if self._state != ReplicaState.LEADER:
                     self._jobsToRetry.clear()
@@ -516,11 +518,12 @@ class Replica:
                                                    LockNames.CURR_TERM_LOCK, \
                                                    LockNames.VOTED_FOR_LOCK, \
                                                    LockNames.NEXT_INDEX_LOCK, \
-                                                   LockNames.MATCH_INDEX_LOCK)
+                                                   LockNames.MATCH_INDEX_LOCK, \
+                                                   LockNames.LOG_LOCK)
 
                     break
 
-                print(f'Retrying appendEntry request ({job.entry}) after {timeoutMS} ms...')
+                print(f'Retrying appendEntry request ({entry}) after {timeoutMS} ms...')
 
                 transport = TSocket.TSocket(job.targetHost, job.targetPort)
                 transport.setTimeout(timeoutMS)
@@ -541,7 +544,7 @@ class Replica:
                                                 ID(self._myID[0], self._myID[1]), \
                                                 job.entryPosition-1, \
                                                 self._log[job.entryPosition-1].term, \
-                                                job.entry, \
+                                                entry, \
                                                 self._commitIndex)
 
                     if appendEntryResponse.term > self._currentTerm:
@@ -555,7 +558,8 @@ class Replica:
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
                                                        LockNames.NEXT_INDEX_LOCK, \
-                                                       LockNames.MATCH_INDEX_LOCK)
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LOG_LOCK)
 
                         break
 
@@ -566,7 +570,8 @@ class Replica:
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
                                                        LockNames.NEXT_INDEX_LOCK, \
-                                                       LockNames.MATCH_INDEX_LOCK)
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LOG_LOCK)
                     else:
                         self._logger.debug(f'Entry successfully replicated on ({job.targetHost}:{job.targetPort}) during retry: Now increasing nextIndex value from {self._nextIndex[(job.targetHost,job.targetPort)]} to {self._nextIndex[(job.targetHost,job.targetPort)]+1}')
                         self._matchIndex[(job.targetHost,job.targetPort)] = self._nextIndex[(job.targetHost,job.targetPort)]
@@ -576,7 +581,8 @@ class Replica:
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
                                                        LockNames.NEXT_INDEX_LOCK, \
-                                                       LockNames.MATCH_INDEX_LOCK)
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LOG_LOCK)
                         break
 
                 except TTransport.TTransportException as e:
@@ -587,7 +593,8 @@ class Replica:
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
                                                        LockNames.NEXT_INDEX_LOCK, \
-                                                       LockNames.MATCH_INDEX_LOCK)
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LOG_LOCK)
                     else:
                         raise e
 
