@@ -7,6 +7,7 @@ from random import randrange, seed
 import logging
 from socket import gethostname, gethostbyname, timeout
 from time import sleep
+import traceback
 
 path.append('gen-py')
 
@@ -18,7 +19,7 @@ from dotenv import load_dotenv
 
 REQUEST_IDENTIFIER_ENV_VAR_NAME = "REQUEST_ID_FILE"
 MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME = "CURRENT_LEADER_INFO_FILE"
-RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS"
+RPC_TIMEOUT_ENV_VAR_NAME = "CMD_LINE_TOOL_TIMEOUT_MS"
 
 from replicaservice import ReplicaService
 
@@ -125,16 +126,20 @@ def putHelper(key, value, clientIdentifier, requestNumber):
                 return True
 
             elif not response.leaderID:
+                logger.debug(f'PUT request unsuccessful and current leader is unknown')
                 host, port = getRandomReplica()
             else:
+                logger.debug(f'PUT request unsuccessful')
                 host = response.leaderID.hostname
                 port = response.leaderID.port
 
         except TTransport.TTransportException as e:
-            logger.debug(f'Experienced transport error while contacting ({host}:{port})')
+            if isinstance(e.inner, timeout):
+                logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
+            else:
+                logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
+
             host, port = getRandomReplica()
-        except timeout:
-            logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
 
 def getLeaderInfo():
     leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')

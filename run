@@ -1,5 +1,7 @@
 #!/bin/bash
 
+rm *.log
+
 ./replica.py 5000 &
 ./replica.py 5001 &
 ./replica.py 5002 &

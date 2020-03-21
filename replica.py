@@ -10,8 +10,9 @@ from os import getenv
 from random import randint
 from socket import gethostname, gethostbyname, timeout
 from time import sleep
-from threading import Thread
+from threading import Thread, get_ident, Condition
 from os import _exit
+from queue import Queue
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
@@ -23,6 +24,13 @@ from states import ReplicaState
 from lockhandler import LockHandler
 from replicaservice import ReplicaService
 from replicaservice.ttypes import Ballot, AppendEntryResponse, Entry, ID, GetResponse, PutResponse
+
+class Job:
+    def __init__(self, entry=None, entryPosition=None, targetHost=None, targetPort=None):
+        self.entry = entry
+        self.entryPosition = entryPosition
+        self.targetHost = targetHost
+        self.targetPort = targetPort
 
 class ReplicaFormatter(logging.Formatter):
     def __init__(self, fmt, replica):
@@ -42,6 +50,7 @@ class Replica:
     CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE"
     HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS"
     RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS"
+    RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT"
 
     def __init__(self, port):
         load_dotenv()
@@ -64,7 +73,8 @@ class Replica:
         self._map = {}
         self._clientResponseCache = {}
         self._numServersReplicatedOn = 0
-        self._currentRequestBeingServiced = 0
+        self._currentRequestBeingServiced = None
+        self._jobsToRetry = Queue()
 
         self._clusterMembership = self._getClusterMembership()
 
@@ -79,6 +89,7 @@ class Replica:
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
+        Thread(target=self._retryRequest).start()
 
     def getState(self):
         return self._state
@@ -179,12 +190,27 @@ class Replica:
 
         self._state = ReplicaState.FOLLOWER
 
+        indicesToRemove = []
+        for i in range(len(self._log)-1, prevLogIndex, -1):
+            indicesToRemove.append(i)
+
+        if indicesToRemove:
+            self._logger.debug(f'Now removing entries at indices {indicesToRemove} from log to bring in line with leader')
+            for _ in indicesToRemove:
+                self._log.pop()
+
         def applyEntry(entry):
             if not (entry and entry.key):
                 return
             self._map[entry.key] = entry.value
 
         if entry:
+            ######################################
+            ### Must Remove - Only For Testing ###
+            ######################################
+            if self._myID[1] == 5000:
+                sleep(0.18)
+
             self._log.append(entry)
 
         if leaderCommit > self._lastApplied:
@@ -196,7 +222,7 @@ class Replica:
 
         self._currentTerm = max(term, self._currentTerm)
 
-        self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry to my log.')
+        self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry ({entry}) to my log.')
 
         response.term = self._currentTerm
 
@@ -282,7 +308,6 @@ class Replica:
         return response
 
     def put(self, key, value, clientIdentifier, requestIdentifier):
-
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
@@ -326,14 +351,15 @@ class Replica:
 
             try:
                 transport.open()
-            except TTransport.TTransportException:
-                self._logger.debug(f'Error while attempting to append an entry to replica at ({host}:{port})')
+            except TTransport.TTransportException as e:
+                self._logger.debug(f'Error while attempting to append an entry to replica at ({host}:{port}): {str(e)}')
                 continue
 
             protocol = TBinaryProtocol.TBinaryProtocol(transport)
             client = ReplicaService.Client(protocol)
 
             try:
+                self._logger.debug(f'Now sending an appendEntry request to ({host}:{port}); may take a while...')
                 appendEntryResponse = client.appendEntry( \
                                             self._currentTerm, \
                                             ID(self._myID[0], self._myID[1]), \
@@ -369,9 +395,13 @@ class Replica:
                     self._nextIndex[(host,port)] += 1
                     self._numServersReplicatedOn += 1
 
-            except timeout:
-                self._logger.debug(f'Timeout occurred while attempting to append entry to replica at ({host}:{port})')
-                continue
+            except TTransport.TTransportException as e:
+                if isinstance(e.inner, timeout):
+                    self._logger.debug(f'Timeout occurred while attempting to append entry to replica at ({host}:{port})')
+                    self._jobsToRetry.put(Job(newLogEntry, len(self._log)-1, host, port))
+                    continue
+
+                raise e
 
         response.leaderID = ID(self._leader[0], self._leader[1])
 
@@ -452,6 +482,106 @@ class Replica:
                 (otherLastLogTerm == myLastLogTerm and \
                         otherLastLogIndex >= myLastLogIndex)
 
+    def _retryRequest(self):
+        maxTimeToSpendRetryingMS = int(getenv(Replica.MIN_ELECTION_TIMEOUT_ENV_VAR_NAME))
+
+        while True:
+            while self._jobsToRetry.empty():
+                sleep(0.01)
+
+            job = self._jobsToRetry.get()
+
+            timeSpentOnCurrentRetryMS = 0
+            timeoutMS = int(getenv(Replica.RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME))
+
+            while timeSpentOnCurrentRetryMS < (0.8 * maxTimeToSpendRetryingMS):
+                sleep(timeoutMS // 1000)
+
+                self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
+                                               LockNames.LEADER_LOCK, \
+                                               LockNames.CURR_TERM_LOCK, \
+                                               LockNames.VOTED_FOR_LOCK, \
+                                               LockNames.NEXT_INDEX_LOCK)
+
+                if self._state != ReplicaState.LEADER:
+                    self._jobsToRetry.clear()
+                    self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                   LockNames.LEADER_LOCK, \
+                                                   LockNames.CURR_TERM_LOCK, \
+                                                   LockNames.VOTED_FOR_LOCK, \
+                                                   LockNames.NEXT_INDEX_LOCK)
+
+                    break
+
+                print(f'Retrying appendEntry request ({job.entry}) after {timeoutMS} ms...')
+
+                transport = TSocket.TSocket(job.targetHost, job.targetPort)
+                transport.setTimeout(timeoutMS)
+                transport = TTransport.TBufferedTransport(transport)
+
+                try:
+                    transport.open()
+                except TTransport.TTransportException as e:
+                    self._logger.debug(f'Error while attempting to retry appending an entry to replica at ({job.targetHost}:{job.targetPort}): {str(e)}')
+
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
+
+                try:
+                    self._logger.debug(f'Now retrying appendEntry request to ({job.targetHost}:{job.targetPort}); may take a while...')
+                    appendEntryResponse = client.appendEntry( \
+                                                self._currentTerm, \
+                                                ID(self._myID[0], self._myID[1]), \
+                                                job.entryPosition-1, \
+                                                self._log[job.entryPosition-1].term, \
+                                                job.entry, \
+                                                self._commitIndex)
+
+                    if appendEntryResponse.term > self._currentTerm:
+                        self._currentTerm = appendEntryResponse.term
+                        self._state = ReplicaState.FOLLOWER
+                        self._votedFor = ()
+                        response.success = False
+                        self._jobsToRetry.clear()
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.NEXT_INDEX_LOCK)
+
+                        break
+
+                    if not appendEntryResponse.success:
+                        self._logger.debug(f'AppendEntryRequest retry directed to ({job.targetHost}:{job.targetPort}) failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!')
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.NEXT_INDEX_LOCK)
+                    else:
+                        self._logger.debug(f'Entry successfully replicated on ({job.targetHost}:{job.targetPort}) during retry: Now increasing replication amount from {self._nextIndex[(job.targetHost,job.targetPort)]} to {self._nextIndex[(job.targetHost,job.targetPort)]+1}')
+                        self._nextIndex[(job.targetHost,job.targetPort)] += 1
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.NEXT_INDEX_LOCK)
+                        break
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        self._logger.debug(f'Timeout occurred while attempting to retry appending entry to replica at ({job.targetHost}:{job.targetPort})')
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.NEXT_INDEX_LOCK)
+                    else:
+                        raise e
+
+                timeSpentOnCurrentRetryMS += timeoutMS
+                timeoutMS *= 1.5
+
     def _timer(self):
         sleep(3)
 
@@ -491,7 +621,7 @@ class Replica:
                 for host, port in self._clusterMembership:
                     self._logger.debug(f'Now requesting vote from {host}:{port}')
                     transport = TSocket.TSocket(host, port)
-                    transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)) / 1000)
+                    transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
                     transport = TTransport.TBufferedTransport(transport)
 
                     try:
@@ -508,10 +638,11 @@ class Replica:
 
                         votesReceived += (1 if ballot.voteGranted else 0)
 
-                    except TTransport.TTransportException:
-                        self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port})')
-                    except timeout:
-                        self._logger.debug(f'Timeout occurred while attempting request vote from ({host}:{port})')
+                    except TTransport.TTransportException as e:
+                        if isinstance(e.inner, timeout):
+                            self._logger.debug(f'Timeout occurred while requesting vote from ({host}:{port})')
+                        else:
+                            self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port}): {str(e)}')
 
                     self._logger.debug(f'{votesReceived} votes have been received during this election')
 
@@ -524,7 +655,7 @@ class Replica:
                             self._matchIndex[(host,port)] = 0
 
                             transport = TSocket.TSocket(host, port)
-                            transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)) / 1000)
+                            transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
                             transport = TTransport.TBufferedTransport(transport)
 
                             try:
@@ -545,10 +676,11 @@ class Replica:
                                     self._currentTerm = response.term
                                     self._votedFor = ()
 
-                            except TTransport.TTransportException:
-                                self._logger.debug(f'Error while attempting to send an empty appendEntry request to replica at ({host}:{port})')
-                            except timeout:
-                                self._logger.debug(f'Timeout experienced while attempting to assert control over ({host}:{port})')
+                            except TTransport.TTransportException as e:
+                                if isinstance(e.inner, timeout):
+                                    self._logger.debug(f'Timeout experienced while attempting to assert control over ({host}:{port})')
+                                else:
+                                    self._logger.debug(f'Error while attempting to send assert control over replica at ({host}:{port}): {str(e)}')
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
@@ -590,6 +722,7 @@ class Replica:
 
             for host, port in self._clusterMembership:
                 transport = TSocket.TSocket(host, port)
+                transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
                 transport = TTransport.TBufferedTransport(transport)
 
                 entryToSend = None
@@ -616,7 +749,7 @@ class Replica:
 
                     if appendEntryResponse.term > self._currentTerm:
                         self._state = ReplicaState.FOLLOWER
-                        self._currentTerm = response.term
+                        self._currentTerm = appendEntryResponse.term
                         self._votedFor = ()
                         break
 
@@ -630,9 +763,11 @@ class Replica:
                     else:
                         self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')
 
-                except TTransport.TTransportException:
-                    self._logger.debug(f'Error while attempting to send an appendEntry request to ({host}:{port}) from heartbeatSender')
-
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        self._logger.debug(f'Timeout experienced while sending heartbeat to ({host}:{port})')
+                    else:
+                        self._logger.debug(f'Error while attempting to send an appendEntry request to ({host}:{port}) from heartbeatSender: {str(e)}')
 
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
@@ -644,7 +779,6 @@ class Replica:
             sleep(self._heartbeatTick / 1000)
 
 if __name__ == "__main__":
-
     if len(sys.argv) != 2:
         print("Incorrect usage: try ./replica.py <port number>")
         sys.exit(1)
@@ -662,7 +796,7 @@ if __name__ == "__main__":
 
         processor = ReplicaService.Processor(replica)
 
-        server = TServer.TThreadPoolServer(processor, transport, tfactory, pfactory)
+        server = TServer.TThreadedServer(processor, transport, tfactory, pfactory)
 
         server.serve()
 
