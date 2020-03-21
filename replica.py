@@ -741,6 +741,8 @@ class Replica:
                 sleep(0.5)
                 continue
 
+            ## Check for entries from the current term that need to be committed
+
             for host, port in self._clusterMembership:
                 transport = TSocket.TSocket(host, port)
                 transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
@@ -799,6 +801,26 @@ class Replica:
                                            LockNames.MATCH_INDEX_LOCK)
 
             sleep(self._heartbeatTick / 1000)
+
+    def _findCommitReadyEntries(self):
+        def areAMajorityGreaterThanOrEqual(numLst, num):
+            numForMajority = (numLst // 2) + 1
+            numGreaterThanOrEqual = 0
+            for currNum in numLst:
+                if num >= currNum:
+                    numGreaterThanOrEqual += 1
+
+            return numGreaterThanOrEqual >= numForMajority
+
+        possibleNewCommitIndex = len(self._log)-1
+        while possibleNewCommitIndex > self._commitIndex:
+            if areAMajorityGreaterThanOrEqual(self._matchIndex, possibleNewCommitIndex) and \
+                                                    self._log[possibleNewCommitIndex].term == self._currentTerm:
+                return possibleNewCommitIndex
+
+            possibleNewCommitIndex -= 1
+
+        return possibleNewCommitIndex
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
