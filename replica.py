@@ -168,6 +168,8 @@ class Replica:
                                        LockNames.MAP_LOCK, \
                                        LockNames.TIMER_LOCK)
 
+        self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry ({entry}) to my log.')
+
         if term >= self._currentTerm:
             self._timeLeft = self._timeout
 
@@ -208,7 +210,7 @@ class Replica:
             ######################################
             ### Must Remove - Only For Testing ###
             ######################################
-            if self._myID[1] == 5000:
+            if self._myID[1] == 5000 or self._myID[1] == 5001:
                 sleep(0.18)
 
             self._log.append(entry)
@@ -221,8 +223,6 @@ class Replica:
         self._leader = (leaderID.hostname, leaderID.port)
 
         self._currentTerm = max(term, self._currentTerm)
-
-        self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry ({entry}) to my log.')
 
         response.term = self._currentTerm
 
@@ -316,7 +316,8 @@ class Replica:
                                        LockNames.VOTED_FOR_LOCK, \
                                        LockNames.NEXT_INDEX_LOCK, \
                                        LockNames.LAST_APPLIED_LOCK, \
-                                       LockNames.REPLICATION_AMOUNT_LOCK)
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.MATCH_INDEX_LOCK)
 
         response = PutResponse(success=True)
         self._logger.debug(f'({self._myID[0]}:{self._myID[1]}) now attempting to associate {value} with {key} ({key} => {value})')
@@ -335,7 +336,8 @@ class Replica:
                                            LockNames.VOTED_FOR_LOCK, \
                                            LockNames.NEXT_INDEX_LOCK, \
                                            LockNames.LAST_APPLIED_LOCK, \
-                                           LockNames.REPLICATION_AMOUNT_LOCK)
+                                           LockNames.REPLICATION_AMOUNT_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
 
             return response
 
@@ -383,7 +385,8 @@ class Replica:
                                            LockNames.VOTED_FOR_LOCK, \
                                            LockNames.NEXT_INDEX_LOCK, \
                                            LockNames.LAST_APPLIED_LOCK, \
-                                           LockNames.REPLICATION_AMOUNT_LOCK)
+                                           LockNames.REPLICATION_AMOUNT_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
 
                     return response
 
@@ -392,6 +395,7 @@ class Replica:
                     self._nextIndex[(host,port)] -= 1
                 else:
                     self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {self._numServersReplicatedOn} to {self._numServersReplicatedOn+1})')
+                    self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
                     self._nextIndex[(host,port)] += 1
                     self._numServersReplicatedOn += 1
 
@@ -423,7 +427,8 @@ class Replica:
                                        LockNames.VOTED_FOR_LOCK, \
                                        LockNames.NEXT_INDEX_LOCK, \
                                        LockNames.LAST_APPLIED_LOCK, \
-                                       LockNames.REPLICATION_AMOUNT_LOCK)
+                                       LockNames.REPLICATION_AMOUNT_LOCK, \
+                                       LockNames.MATCH_INDEX_LOCK)
 
         return response
 
@@ -501,7 +506,8 @@ class Replica:
                                                LockNames.LEADER_LOCK, \
                                                LockNames.CURR_TERM_LOCK, \
                                                LockNames.VOTED_FOR_LOCK, \
-                                               LockNames.NEXT_INDEX_LOCK)
+                                               LockNames.NEXT_INDEX_LOCK, \
+                                               LockNames.MATCH_INDEX_LOCK)
 
                 if self._state != ReplicaState.LEADER:
                     self._jobsToRetry.clear()
@@ -509,7 +515,8 @@ class Replica:
                                                    LockNames.LEADER_LOCK, \
                                                    LockNames.CURR_TERM_LOCK, \
                                                    LockNames.VOTED_FOR_LOCK, \
-                                                   LockNames.NEXT_INDEX_LOCK)
+                                                   LockNames.NEXT_INDEX_LOCK, \
+                                                   LockNames.MATCH_INDEX_LOCK)
 
                     break
 
@@ -547,7 +554,8 @@ class Replica:
                                                        LockNames.LEADER_LOCK, \
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
-                                                       LockNames.NEXT_INDEX_LOCK)
+                                                       LockNames.NEXT_INDEX_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK)
 
                         break
 
@@ -557,15 +565,18 @@ class Replica:
                                                        LockNames.LEADER_LOCK, \
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
-                                                       LockNames.NEXT_INDEX_LOCK)
+                                                       LockNames.NEXT_INDEX_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK)
                     else:
-                        self._logger.debug(f'Entry successfully replicated on ({job.targetHost}:{job.targetPort}) during retry: Now increasing replication amount from {self._nextIndex[(job.targetHost,job.targetPort)]} to {self._nextIndex[(job.targetHost,job.targetPort)]+1}')
+                        self._logger.debug(f'Entry successfully replicated on ({job.targetHost}:{job.targetPort}) during retry: Now increasing nextIndex value from {self._nextIndex[(job.targetHost,job.targetPort)]} to {self._nextIndex[(job.targetHost,job.targetPort)]+1}')
+                        self._matchIndex[(job.targetHost,job.targetPort)] = self._nextIndex[(job.targetHost,job.targetPort)]
                         self._nextIndex[(job.targetHost,job.targetPort)] += 1
                         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                                        LockNames.LEADER_LOCK, \
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
-                                                       LockNames.NEXT_INDEX_LOCK)
+                                                       LockNames.NEXT_INDEX_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK)
                         break
 
                 except TTransport.TTransportException as e:
@@ -575,7 +586,8 @@ class Replica:
                                                        LockNames.LEADER_LOCK, \
                                                        LockNames.CURR_TERM_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
-                                                       LockNames.NEXT_INDEX_LOCK)
+                                                       LockNames.NEXT_INDEX_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK)
                     else:
                         raise e
 
@@ -708,7 +720,8 @@ class Replica:
                                            LockNames.STATE_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
-                                           LockNames.NEXT_INDEX_LOCK)
+                                           LockNames.NEXT_INDEX_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
 
             if self._state != ReplicaState.LEADER:
                 self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
@@ -716,7 +729,8 @@ class Replica:
                                                LockNames.STATE_LOCK, \
                                                LockNames.COMMIT_INDEX_LOCK, \
                                                LockNames.VOTED_FOR_LOCK, \
-                                               LockNames.NEXT_INDEX_LOCK)
+                                               LockNames.NEXT_INDEX_LOCK, \
+                                               LockNames.MATCH_INDEX_LOCK)
                 sleep(0.5)
                 continue
 
@@ -774,7 +788,8 @@ class Replica:
                                            LockNames.STATE_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
-                                           LockNames.NEXT_INDEX_LOCK)
+                                           LockNames.NEXT_INDEX_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
 
             sleep(self._heartbeatTick / 1000)
 
