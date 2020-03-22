@@ -741,7 +741,17 @@ class Replica:
                 sleep(0.5)
                 continue
 
-            ## Check for entries from the current term that need to be committed
+            self._commitIndex = self._findUpdatedCommitIndex()
+
+            if self._commitIndex > self._lastApplied:
+                def applyEntry(entry):
+                    if not (entry and entry.key):
+                        return
+                    self._map[entry.key] = entry.value
+
+                self._logger.debug(f'Now Applying log entry ({self._log[self._lastApplied+1]}) to state machine')
+                self._lastApplied += 1
+                applyEntry(self._log[self._lastApplied])
 
             for host, port in self._clusterMembership:
                 transport = TSocket.TSocket(host, port)
@@ -802,9 +812,9 @@ class Replica:
 
             sleep(self._heartbeatTick / 1000)
 
-    def _findCommitReadyEntries(self):
+    def _findUpdatedCommitIndex(self):
         def areAMajorityGreaterThanOrEqual(numLst, num):
-            numForMajority = (numLst // 2) + 1
+            numForMajority = (len(numLst) // 2) + 1
             numGreaterThanOrEqual = 0
             for currNum in numLst:
                 if num >= currNum:
@@ -814,7 +824,7 @@ class Replica:
 
         possibleNewCommitIndex = len(self._log)-1
         while possibleNewCommitIndex > self._commitIndex:
-            if areAMajorityGreaterThanOrEqual(self._matchIndex, possibleNewCommitIndex) and \
+            if areAMajorityGreaterThanOrEqual(self._matchIndex.values(), possibleNewCommitIndex) and \
                                                     self._log[possibleNewCommitIndex].term == self._currentTerm:
                 return possibleNewCommitIndex
 
