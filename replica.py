@@ -25,6 +25,15 @@ from lockhandler import LockHandler
 from replicaservice import ReplicaService
 from replicaservice.ttypes import Ballot, AppendEntryResponse, Entry, ID, GetResponse, PutResponse
 
+def areAMajorityGreaterThanOrEqual(numLst, num):
+    numForMajority = (len(numLst) // 2) + 1
+    numGreaterThanOrEqual = 0
+    for currNum in numLst:
+        if num >= currNum:
+            numGreaterThanOrEqual += 1
+
+    return numGreaterThanOrEqual >= numForMajority
+
 class Job:
     def __init__(self, entryPosition=None, targetHost=None, targetPort=None):
         self.entryPosition = entryPosition
@@ -340,8 +349,42 @@ class Replica:
 
             return response
 
+        if requestIdentifier == self._currentRequestBeingServiced:
+            self._logger.debug(f'Continuing servicing of request {requestIdentifier}')
+
+            relevantEntryIndex = 0
+            for entryIndex in range(len(self._log)):
+                if self._log[entryIndex].requestIdentifier == requestIdentifier:
+                    relevantEntryIndex = entryIndex
+                    break
+
+            assert relevantEntryIndex != 0
+
+            entryIsFromCurrentTerm = (self._log[relevantEntryIndex].term == self._currentTerm)
+
+            response.success = entryIsFromCurrentTerm and \
+                                   areAMajorityGreaterThanOrEqual(self._matchIndex.values(), relevantEntryIndex)
+
+            self._logger.debug(f'Is this entry from this term? = {entryIsFromCurrentTerm}')
+            self._logger.debug(f'Has the entry been successfully replicated on a majority of replicas {areAMajorityGreaterThanOrEqual(self._matchIndex.values(), relevantEntryIndex)}')
+
+            self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.NEXT_INDEX_LOCK, \
+                                           LockNames.LAST_APPLIED_LOCK, \
+                                           LockNames.REPLICATION_AMOUNT_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
+
+            return response
+
         newLogEntry = Entry(key, value, self._currentTerm, clientIdentifier, requestIdentifier)
         self._log.append(newLogEntry)
+
+        self._currentRequestBeingServiced = requestIdentifier
 
         self._numServersReplicatedOn = 1
 
@@ -813,15 +856,6 @@ class Replica:
             sleep(self._heartbeatTick / 1000)
 
     def _findUpdatedCommitIndex(self):
-        def areAMajorityGreaterThanOrEqual(numLst, num):
-            numForMajority = (len(numLst) // 2) + 1
-            numGreaterThanOrEqual = 0
-            for currNum in numLst:
-                if num >= currNum:
-                    numGreaterThanOrEqual += 1
-
-            return numGreaterThanOrEqual >= numForMajority
-
         possibleNewCommitIndex = len(self._log)-1
         while possibleNewCommitIndex > self._commitIndex:
             if areAMajorityGreaterThanOrEqual(self._matchIndex.values(), possibleNewCommitIndex) and \

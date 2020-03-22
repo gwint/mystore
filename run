@@ -2,6 +2,9 @@
 
 rm *.log
 
+echo -n "127.0.0.1:5000" > .leader
+echo -n "4" > .request
+
 ./replica.py 5000 &
 ./replica.py 5001 &
 ./replica.py 5002 &
