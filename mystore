@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 REQUEST_IDENTIFIER_ENV_VAR_NAME = "REQUEST_ID_FILE"
 MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME = "CURRENT_LEADER_INFO_FILE"
 RPC_TIMEOUT_ENV_VAR_NAME = "CMD_LINE_TOOL_TIMEOUT_MS"
+NUM_REQUEST_RETRIES_ENV_VAR_NAME = "CMD_LINE_TOTAL_NUM_RETRIES_PER_REQUEST"
+REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME = "CMD_LINE_TOOL_REST_PERIOD_BETWEEN_CALLS_MS"
 
 from replicaservice import ReplicaService
 
@@ -29,6 +31,12 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
+
+class PutFailureException(Exception):
+    pass
+
+class GetFailureException(Exception):
+    pass
 
 def killReplica(url):
     if ':' not in url or list(url).count(':') != 1:
@@ -53,6 +61,7 @@ def get(key):
     nextRequestIdentifier = getNextRequestIdentifier()
     ret = getHelper(key, nextRequestIdentifier)
     #setNextRequestIdentifier(nextRequestIdentifier + 1)
+
     return ret
 
 def getHelper(key, requestNumber):
@@ -94,7 +103,8 @@ def put(key, value):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
     ret = putHelper(key, value, hostIP, nextRequestIdentifier)
-    #setNextRequestIdentifier(nextRequestIdentifier + 1)
+    setNextRequestIdentifier(nextRequestIdentifier + 1)
+
     return ret
 
 def putHelper(key, value, clientIdentifier, requestNumber):
@@ -140,6 +150,8 @@ def putHelper(key, value, clientIdentifier, requestNumber):
                 logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
 
             host, port = getRandomReplica()
+
+    return False
 
 def getLeaderInfo():
     leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')
@@ -212,8 +224,14 @@ if __name__ == "__main__":
     elif args.command == "members":
         listClusterMembers(args.table)
     elif args.command == "put":
-        print(put(args.key, args.value))
+        try:
+            print(put(args.key, args.value))
+        except PutFailureException:
+            print("PUT Request Failed")
     elif args.command == "get":
-        print(get(args.key))
+        try:
+            print(get(args.key))
+        except GetFailureException:
+            print("GET Request Failed")
     else:
         parser.error("No command provided: must be one of (kill, members, put, get)")
