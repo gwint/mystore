@@ -82,6 +82,7 @@ class Replica:
         self._clientResponseCache = {}
         self._currentRequestBeingServiced = None
         self._jobsToRetry = Queue()
+        self._noopIndex = None
 
         self._clusterMembership = self._getClusterMembership()
 
@@ -682,29 +683,36 @@ class Replica:
 
                     try:
                         transport.open()
-                        protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                        client = ReplicaService.Client(protocol)
 
-                        leaderID = self._getID(self._myID[0], self._myID[1])
+                        try:
+                            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                            client = ReplicaService.Client(protocol)
 
-                        ballot = client.requestVote(self._currentTerm, \
-                                                    leaderID, \
-                                                    len(self._log), \
-                                                    self._log[-1].term)
+                            leaderID = self._getID(self._myID[0], self._myID[1])
 
-                        votesReceived += (1 if ballot.voteGranted else 0)
+                            ballot = client.requestVote(self._currentTerm, \
+                                                        leaderID, \
+                                                        len(self._log), \
+                                                        self._log[-1].term)
+
+                            votesReceived += (1 if ballot.voteGranted else 0)
+
+                        except TTransport.TTransportException as e:
+                            if isinstance(e.inner, timeout):
+                                self._logger.debug(f'Timeout occurred while requesting vote from ({host}:{port})')
+                            else:
+                                self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port}): {str(e)}')
 
                     except TTransport.TTransportException as e:
-                        if isinstance(e.inner, timeout):
-                            self._logger.debug(f'Timeout occurred while requesting vote from ({host}:{port})')
-                        else:
-                            self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port}): {str(e)}')
+                        self._logger.debug(f'Error while attempting to open a connection to request a vote from replica at ({host}:{port}): {str(e)}')
 
                     self._logger.debug(f'{votesReceived} votes have been received during this election')
 
                     if votesReceived >= ((len(self._clusterMembership)+1) // 2) + 1:
                         self._state = ReplicaState.LEADER
                         self._leader = self._myID
+
+                        self._noopIndex = len(self._log)
 
                         for host, port in self._clusterMembership:
                             self._nextIndex[(host,port)] = len(self._log)
