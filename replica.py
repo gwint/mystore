@@ -93,7 +93,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(12)
+        self._lockHandler = LockHandler(13)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -257,7 +257,8 @@ class Replica:
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.MATCH_INDEX_LOCK)
 
         self._logger.debug(f'({self._myID[0]}:{self._myID[1]}) now attempting to retrieve value associated with {key}')
 
@@ -273,7 +274,8 @@ class Replica:
                                            LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
-                                           LockNames.VOTED_FOR_LOCK)
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK)
 
             return response
 
@@ -284,7 +286,6 @@ class Replica:
 
             try:
                 transport.open()
-
                 try:
                     protocol = TBinaryProtocol.TBinaryProtocol(transport)
                     client = ReplicaService.Client(protocol)
@@ -304,7 +305,16 @@ class Replica:
                         self._currentTerm = response.term
                         self._votedFor = ()
                         response.success = False
-                        break
+
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.LOG_LOCK, \
+                                                       LockNames.COMMIT_INDEX_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK)
+
+                        return response
 
                 except TTransport.TTransportException as e:
                     if isinstance(e.inner, timeout):
@@ -312,16 +322,20 @@ class Replica:
                     else:
                         self._logger.debug(f'Error while attempting to send a heartbeat to replica at ({host}:{port}): {str(e)}')
 
-
             except TTransport.TTransportException as e:
                 self._logger.debug(f'Error while attempting to open a connection to send an empty appendEntry request to ({host}:{port})')
+
+        ## Check that no-op entry for this leader's term has been committed, if so read from map and return
+        ## Else, return false so that client can retry
+        ##if areAMajorityGreaterThanOrEqual(self._matchIndex, )
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.MATCH_INDEX_LOCK)
 
         return response
 
