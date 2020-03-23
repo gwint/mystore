@@ -724,27 +724,32 @@ class Replica:
 
                             try:
                                 transport.open()
-                                protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                                client = ReplicaService.Client(protocol)
 
-                                response = client.appendEntry( \
-                                     self._currentTerm, \
-                                     self._getID(self._myID[0], self._myID[1]), \
-                                     len(self._log)-1, \
-                                     self._log[-1].term, \
-                                     None, \
-                                     self._commitIndex)
+                                try:
+                                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                                    client = ReplicaService.Client(protocol)
 
-                                if response.term > self._currentTerm:
-                                    self._state = ReplicaState.FOLLOWER
-                                    self._currentTerm = response.term
-                                    self._votedFor = ()
+                                    response = client.appendEntry( \
+                                         self._currentTerm, \
+                                         self._getID(self._myID[0], self._myID[1]), \
+                                         len(self._log)-1, \
+                                         self._log[-1].term, \
+                                         None, \
+                                         self._commitIndex)
+
+                                    if response.term > self._currentTerm:
+                                        self._state = ReplicaState.FOLLOWER
+                                        self._currentTerm = response.term
+                                        self._votedFor = ()
+
+                                except TTransport.TTransportException as e:
+                                    if isinstance(e.inner, timeout):
+                                        self._logger.debug(f'Timeout experienced while attempting to assert control over replica at ({host}:{port})')
+                                    else:
+                                        self._logger.debug(f'Error while attempting to assert control over replica at ({host}:{port}): {str(e)}')
 
                             except TTransport.TTransportException as e:
-                                if isinstance(e.inner, timeout):
-                                    self._logger.debug(f'Timeout experienced while attempting to assert control over ({host}:{port})')
-                                else:
-                                    self._logger.debug(f'Error while attempting to send assert control over replica at ({host}:{port}): {str(e)}')
+                                self._logger.debug(f'Error while attempting to establish connection to assert control over replica at ({host}:{port}): {str(e)}')
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
