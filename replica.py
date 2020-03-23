@@ -284,28 +284,37 @@ class Replica:
 
             try:
                 transport.open()
-                protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                client = ReplicaService.Client(protocol)
 
-                self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
+                try:
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
 
-                response = client.appendEntry( \
-                                  self._currentTerm, \
-                                  self._getID(self._myID[0], self._myID[1]), \
-                                  len(self._log)-1, \
-                                  self._log[-1].term, \
-                                  None, \
-                                  self._commitIndex)
+                    self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
 
-                if response.term > self._currentTerm:
-                    self._state = ReplicaState.FOLLOWER
-                    self._currentTerm = response.term
-                    self._votedFor = ()
-                    response.success = False
-                    break
+                    response = client.appendEntry( \
+                                      self._currentTerm, \
+                                      self._getID(self._myID[0], self._myID[1]), \
+                                      len(self._log)-1, \
+                                      self._log[-1].term, \
+                                      None, \
+                                      self._commitIndex)
 
-            except TTransport.TTransportException:
-                self._logger.debug(f'Error while attempting to send an empty appendEntry request to ({host}:{port})')
+                    if response.term > self._currentTerm:
+                        self._state = ReplicaState.FOLLOWER
+                        self._currentTerm = response.term
+                        self._votedFor = ()
+                        response.success = False
+                        break
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        self._logger.debug(f'Timeout occurred while attempting to send heartbeat to replica at ({host}:{port})')
+                    else:
+                        self._logger.debug(f'Error while attempting to send a heartbeat to replica at ({host}:{port}): {str(e)}')
+
+
+            except TTransport.TTransportException as e:
+                self._logger.debug(f'Error while attempting to open a connection to send an empty appendEntry request to ({host}:{port})')
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
