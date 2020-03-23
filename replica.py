@@ -210,8 +210,9 @@ class Replica:
                 self._log.pop()
 
         def applyEntry(entry):
-            if not (entry and entry.key):
+            if not (entry):
                 return
+
             self._map[entry.key] = entry.value
 
         if entry:
@@ -713,6 +714,10 @@ class Replica:
                         self._leader = self._myID
 
                         self._noopIndex = len(self._log)
+                        noopEntry = Entry(key="", \
+                                          value="", \
+                                          term=self._currentTerm)
+                        self._log.append(noopEntry)
 
                         for host, port in self._clusterMembership:
                             self._nextIndex[(host,port)] = len(self._log)
@@ -734,7 +739,7 @@ class Replica:
                                          self._getID(self._myID[0], self._myID[1]), \
                                          len(self._log)-1, \
                                          self._log[-1].term, \
-                                         None, \
+                                         noopEntry, \
                                          self._commitIndex)
 
                                     if response.term > self._currentTerm:
@@ -745,6 +750,7 @@ class Replica:
                                 except TTransport.TTransportException as e:
                                     if isinstance(e.inner, timeout):
                                         self._logger.debug(f'Timeout experienced while attempting to assert control over replica at ({host}:{port})')
+                                        self._jobsToRetry.put(Job(len(self._log)-1, host, port))
                                     else:
                                         self._logger.debug(f'Error while attempting to assert control over replica at ({host}:{port}): {str(e)}')
 
@@ -795,7 +801,7 @@ class Replica:
 
             if self._commitIndex > self._lastApplied:
                 def applyEntry(entry):
-                    if not (entry and entry.key):
+                    if not entry:
                         return
                     self._map[entry.key] = entry.value
 
@@ -819,38 +825,44 @@ class Replica:
 
                 try:
                     transport.open()
-                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                    client = ReplicaService.Client(protocol)
 
-                    appendEntryResponse = client.appendEntry( \
-                                  self._currentTerm, \
-                                  self._getID(self._myID[0], self._myID[1]), \
-                                  prevLogIndex, \
-                                  prevLogTerm, \
-                                  entryToSend, \
-                                  self._commitIndex)
+                    try:
+                        protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                        client = ReplicaService.Client(protocol)
 
-                    if appendEntryResponse.term > self._currentTerm:
-                        self._state = ReplicaState.FOLLOWER
-                        self._currentTerm = appendEntryResponse.term
-                        self._votedFor = ()
-                        break
+                        appendEntryResponse = client.appendEntry( \
+                                      self._currentTerm, \
+                                      self._getID(self._myID[0], self._myID[1]), \
+                                      prevLogIndex, \
+                                      prevLogTerm, \
+                                      entryToSend, \
+                                      self._commitIndex)
 
-                    if not appendEntryResponse.success:
-                        self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
-                        self._nextIndex[(host,port)] = max(0, self._nextIndex[(host,port)] - 1)
-                    elif entryToSend:
-                        self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) successful: Increasing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]+1}')
-                        self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
-                        self._nextIndex[(host,port)] += 1
-                    else:
-                        self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')
+                        if appendEntryResponse.term > self._currentTerm:
+                            self._state = ReplicaState.FOLLOWER
+                            self._currentTerm = appendEntryResponse.term
+                            self._votedFor = ()
+                            break
+
+                        if not appendEntryResponse.success:
+                            self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
+                            self._nextIndex[(host,port)] = max(0, self._nextIndex[(host,port)] - 1)
+                        elif entryToSend:
+                            self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) successful: Increasing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]+1}')
+                            self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
+                            self._nextIndex[(host,port)] += 1
+                        else:
+                            self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')
+
+                    except TTransport.TTransportException as e:
+                        if isinstance(e.inner, timeout):
+                            self._logger.debug(f'Timeout experienced while sending heartbeat to ({host}:{port})')
+                            self._jobsToRetry.put(Job(self._nextIndex[(host, port)], host, port))
+                        else:
+                            self._logger.debug(f'Error while attempting to send an appendEntry request to ({host}:{port}) from heartbeatSender: {str(e)}')
 
                 except TTransport.TTransportException as e:
-                    if isinstance(e.inner, timeout):
-                        self._logger.debug(f'Timeout experienced while sending heartbeat to ({host}:{port})')
-                    else:
-                        self._logger.debug(f'Error while attempting to send an appendEntry request to ({host}:{port}) from heartbeatSender: {str(e)}')
+                    self._logger.debug(f'Error while attempting to establish a connection to send an appendEntry request to ({host}:{port}) from heartbeatSender: {str(e)}')
 
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
