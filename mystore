@@ -60,12 +60,12 @@ def listClusterMembers(isTableUsed):
 
 def get(key):
     nextRequestIdentifier = getNextRequestIdentifier()
-    ret = getHelper(key, nextRequestIdentifier)
-    #setNextRequestIdentifier(nextRequestIdentifier + 1)
+    hostIP = gethostbyname(gethostname())
+    ret = getHelper(key, hostIP, nextRequestIdentifier)
 
     return ret
 
-def getHelper(key, requestNumber):
+def getHelper(key, clientIdentifier, requestNumber):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -104,7 +104,6 @@ def put(key, value):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
     ret = putHelper(key, value, hostIP, nextRequestIdentifier)
-    ##setNextRequestIdentifier(nextRequestIdentifier + 1)
 
     return ret
 

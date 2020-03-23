@@ -70,7 +70,8 @@ service ReplicaService {
                          6:i32 leaderCommit),
 
     GetResponse get(1:string key,
-                    2:i32 requestNumber),
+                    2:string clientIdentifier,
+                    3:i32 requestIdentifier),
 
     PutResponse put(1:string key,
                     2:string value,

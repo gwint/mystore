@@ -80,7 +80,6 @@ class Replica:
         self._leader = ()
         self._map = {}
         self._clientResponseCache = {}
-        self._numServersReplicatedOn = 0
         self._currentRequestBeingServiced = None
         self._jobsToRetry = Queue()
 
@@ -93,7 +92,7 @@ class Replica:
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(13)
+        self._lockHandler = LockHandler(12)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -248,7 +247,7 @@ class Replica:
         self._logger.debug(f'{self._myID[0]}:{self._myID[1]} is now dying')
         _exit(0)
 
-    def get(self, key, requestNumber):
+    def get(self, key, clientIdentifier, requestNumber):
         response = GetResponse(success=True)
 
         self._lockHandler.acquireLocks(LockNames.STATE_LOCK, \
@@ -324,7 +323,6 @@ class Replica:
                                        LockNames.VOTED_FOR_LOCK, \
                                        LockNames.NEXT_INDEX_LOCK, \
                                        LockNames.LAST_APPLIED_LOCK, \
-                                       LockNames.REPLICATION_AMOUNT_LOCK, \
                                        LockNames.MATCH_INDEX_LOCK)
 
         response = PutResponse(success=True)
@@ -344,7 +342,6 @@ class Replica:
                                            LockNames.VOTED_FOR_LOCK, \
                                            LockNames.NEXT_INDEX_LOCK, \
                                            LockNames.LAST_APPLIED_LOCK, \
-                                           LockNames.REPLICATION_AMOUNT_LOCK, \
                                            LockNames.MATCH_INDEX_LOCK)
 
             return response
@@ -376,7 +373,6 @@ class Replica:
                                            LockNames.VOTED_FOR_LOCK, \
                                            LockNames.NEXT_INDEX_LOCK, \
                                            LockNames.LAST_APPLIED_LOCK, \
-                                           LockNames.REPLICATION_AMOUNT_LOCK, \
                                            LockNames.MATCH_INDEX_LOCK)
 
             return response
@@ -386,7 +382,7 @@ class Replica:
 
         self._currentRequestBeingServiced = requestIdentifier
 
-        self._numServersReplicatedOn = 1
+        numServersReplicatedOn = 1
 
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)
@@ -427,7 +423,6 @@ class Replica:
                                            LockNames.VOTED_FOR_LOCK, \
                                            LockNames.NEXT_INDEX_LOCK, \
                                            LockNames.LAST_APPLIED_LOCK, \
-                                           LockNames.REPLICATION_AMOUNT_LOCK, \
                                            LockNames.MATCH_INDEX_LOCK)
 
                     return response
@@ -436,10 +431,10 @@ class Replica:
                     self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
                     self._nextIndex[(host,port)] -= 1
                 else:
-                    self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {self._numServersReplicatedOn} to {self._numServersReplicatedOn+1})')
+                    self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {numServersReplicatedOn} to {numServersReplicatedOn+1})')
                     self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
                     self._nextIndex[(host,port)] += 1
-                    self._numServersReplicatedOn += 1
+                    numServersReplicatedOn += 1
 
             except TTransport.TTransportException as e:
                 if isinstance(e.inner, timeout):
@@ -451,8 +446,8 @@ class Replica:
 
         response.leaderID = ID(self._leader[0], self._leader[1])
 
-        if self._numServersReplicatedOn < ((len(self._clusterMembership) + 1) // 2) + 1:
-            self._logger.debug(f'Entry unsuccessfully replicated on a majority of servers: replication amount = {self._numServersReplicatedOn} / {(len(self._clusterMembership) + 1 // 2) + 1}')
+        if numServersReplicatedOn < ((len(self._clusterMembership) + 1) // 2) + 1:
+            self._logger.debug(f'Entry unsuccessfully replicated on a majority of servers: replication amount = {numServersReplicatedOn} / {(len(self._clusterMembership) + 1 // 2) + 1}')
             response.success = False
         else:
             self._logger.debug(f'Entry successfully replicated on a majority of servers and writing mapping ({key} => {value}) to the state machine')
@@ -469,7 +464,6 @@ class Replica:
                                        LockNames.VOTED_FOR_LOCK, \
                                        LockNames.NEXT_INDEX_LOCK, \
                                        LockNames.LAST_APPLIED_LOCK, \
-                                       LockNames.REPLICATION_AMOUNT_LOCK, \
                                        LockNames.MATCH_INDEX_LOCK)
 
         return response
