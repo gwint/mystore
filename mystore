@@ -7,6 +7,7 @@ from random import randrange, seed
 import logging
 from socket import gethostname, gethostbyname, timeout
 from time import sleep
+import traceback
 
 path.append('gen-py')
 
@@ -18,7 +19,10 @@ from dotenv import load_dotenv
 
 REQUEST_IDENTIFIER_ENV_VAR_NAME = "REQUEST_ID_FILE"
 MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME = "CURRENT_LEADER_INFO_FILE"
-RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS"
+RPC_TIMEOUT_ENV_VAR_NAME = "CMD_LINE_TOOL_TIMEOUT_MS"
+NUM_REQUEST_RETRIES_ENV_VAR_NAME = "CMD_LINE_TOTAL_NUM_RETRIES_PER_REQUEST"
+REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME = "CMD_LINE_TOOL_REST_PERIOD_BETWEEN_CALLS_MS"
+NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME = "CMD_LINE_TOOL_NUM_REQUEST_RETRY_CYCLES_BEFORE_QUITTING"
 
 from replicaservice import ReplicaService
 
@@ -28,6 +32,12 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
+
+class PutFailureException(Exception):
+    pass
+
+class GetFailureException(Exception):
+    pass
 
 def killReplica(url):
     if ':' not in url or list(url).count(':') != 1:
@@ -50,11 +60,12 @@ def listClusterMembers(isTableUsed):
 
 def get(key):
     nextRequestIdentifier = getNextRequestIdentifier()
-    ret = getHelper(key, nextRequestIdentifier)
-    #setNextRequestIdentifier(nextRequestIdentifier + 1)
+    hostIP = gethostbyname(gethostname())
+    ret = getHelper(key, hostIP, nextRequestIdentifier)
+
     return ret
 
-def getHelper(key, requestNumber):
+def getHelper(key, clientIdentifier, requestNumber):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -93,7 +104,7 @@ def put(key, value):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
     ret = putHelper(key, value, hostIP, nextRequestIdentifier)
-    #setNextRequestIdentifier(nextRequestIdentifier + 1)
+
     return ret
 
 def putHelper(key, value, clientIdentifier, requestNumber):
@@ -101,40 +112,60 @@ def putHelper(key, value, clientIdentifier, requestNumber):
     if not leaderInfo:
         leaderInfo = getRandomReplica()
 
+    numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
+    numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
+    pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
+
+    currentRequestNumber = requestNumber
     host, port = leaderInfo
 
-    while True:
-        transport = TSocket.TSocket(host, port)
-        transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
-        transport = TTransport.TBufferedTransport(transport)
+    for cycleNum in range(numCyclesBeforeQuitting):
+        logger.debug(f'Now entering cycle {cycleNum} for PUT request')
+        for retryNum in range(numRetriesBeforeChangingRequestID):
+            logger.debug(f'Request Identifier {currentRequestNumber} being used for PUT attempt {retryNum}')
+            transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
+            transport = TTransport.TBufferedTransport(transport)
 
-        try:
-            transport.open()
-            protocol = TBinaryProtocol.TBinaryProtocol(transport)
-            client = ReplicaService.Client(protocol)
+            try:
+                transport.open()
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
 
-            logger.debug(f'Now contacting ({host}:{port}) to resolve PUT')
+                logger.debug(f'Now contacting ({host}:{port}) to resolve PUT')
 
-            sleep(0.5)
-            response = client.put(str(key), str(value), clientIdentifier, requestNumber)
+                try:
+                    response = client.put(str(key), str(value), clientIdentifier, currentRequestNumber)
 
-            if response.success:
-                logger.debug(f'PUT request successfully resolved: {key} => {value}')
-                open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
+                    if response.success:
+                        logger.debug(f'PUT request successfully resolved: {key} => {value}')
+                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
+                        setNextRequestIdentifier(currentRequestNumber + 1)
 
-                return True
+                        return True
 
-            elif not response.leaderID:
+                    elif not response.leaderID:
+                        logger.debug(f'PUT request unsuccessful and current leader is unknown')
+                        host, port = getRandomReplica()
+                    else:
+                        logger.debug(f'PUT request unsuccessful')
+                        host = response.leaderID.hostname
+                        port = response.leaderID.port
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
+
+            except TTransport.TTransportException as e:
+                logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
                 host, port = getRandomReplica()
-            else:
-                host = response.leaderID.hostname
-                port = response.leaderID.port
 
-        except TTransport.TTransportException as e:
-            logger.debug(f'Experienced transport error while contacting ({host}:{port})')
-            host, port = getRandomReplica()
-        except timeout:
-            logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
+            sleep(pauseDurationAfterRetryMS / 1000)
+
+        currentRequestNumber += 1
+
+    raise PutFailureException()
+
 
 def getLeaderInfo():
     leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')
@@ -207,8 +238,14 @@ if __name__ == "__main__":
     elif args.command == "members":
         listClusterMembers(args.table)
     elif args.command == "put":
-        print(put(args.key, args.value))
+        try:
+            print(put(args.key, args.value))
+        except PutFailureException:
+            print("PUT Request Failed")
     elif args.command == "get":
-        print(get(args.key))
+        try:
+            print(get(args.key))
+        except GetFailureException:
+            print("GET Request Failed")
     else:
         parser.error("No command provided: must be one of (kill, members, put, get)")

@@ -22,9 +22,6 @@ class LockHandler:
             currentThreadLocks = \
                     self._perThreadAcquiredLocks.get(currThreadId, set())
 
-            if name in currentThreadLocks:
-                raise ValueError("Thread %d has attempted to acquire lock %s, which it has previously acquired" % (currThreadId, name))
-
             if currThreadId not in self._perThreadAcquiredLocks:
                 self._perThreadAcquiredLocks[currThreadId] = set()
 
