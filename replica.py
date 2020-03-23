@@ -258,7 +258,8 @@ class Replica:
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.MATCH_INDEX_LOCK)
+                                       LockNames.MATCH_INDEX_LOCK, \
+                                       LockNames.LATEST_NO_OP_LOG_INDEX)
 
         self._logger.debug(f'({self._myID[0]}:{self._myID[1]}) now attempting to retrieve value associated with {key}')
 
@@ -275,7 +276,8 @@ class Replica:
                                            LockNames.LOG_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
                                            LockNames.VOTED_FOR_LOCK, \
-                                           LockNames.MATCH_INDEX_LOCK)
+                                           LockNames.MATCH_INDEX_LOCK, \
+                                           LockNames.LATEST_NO_OP_LOG_INDEX)
 
             return response
 
@@ -312,7 +314,8 @@ class Replica:
                                                        LockNames.LOG_LOCK, \
                                                        LockNames.COMMIT_INDEX_LOCK, \
                                                        LockNames.VOTED_FOR_LOCK, \
-                                                       LockNames.MATCH_INDEX_LOCK)
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LATEST_NO_OP_LOG_INDEX)
 
                         return response
 
@@ -335,7 +338,8 @@ class Replica:
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
                                        LockNames.VOTED_FOR_LOCK, \
-                                       LockNames.MATCH_INDEX_LOCK)
+                                       LockNames.MATCH_INDEX_LOCK, \
+                                       LockNames.LATEST_NO_OP_LOG_INDEX)
 
         return response
 
