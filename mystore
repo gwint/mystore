@@ -70,35 +70,56 @@ def getHelper(key, clientIdentifier, requestNumber):
     if not leaderInfo:
         leaderInfo = getRandomReplica()
 
+    numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
+    numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
+    pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
+
+    currentRequestNumber = requestNumber
     host, port = leaderInfo
 
-    while True:
-        transport = TSocket.TSocket(host, port)
-        transport = TTransport.TBufferedTransport(transport)
-        try:
-            transport.open()
-            protocol = TBinaryProtocol.TBinaryProtocol(transport)
-            client = ReplicaService.Client(protocol)
+    for cycleNum in range(numCyclesBeforeQuitting):
+        for retryNum in range(numRetriesBeforeChangingRequestID):
+            transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
+            transport = TTransport.TBufferedTransport(transport)
+            try:
+                transport.open()
+                try:
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
 
-            logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
+                    logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
 
-            response = client.get(str(key), requestNumber)
+                    response = client.get(str(key), clientIdentifier, currentRequestNumber)
 
-            if response.success:
-                logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
-                open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
+                    if response.success:
+                        logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
+                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
+                        setNextRequestIdentifier(currentRequestNumber + 1)
 
-                return response.value
+                        return response.value
 
-            elif not response.leaderID:
+                    elif not response.leaderID:
+                        logger.debug(f'GET request unsuccessful and current leader is unknown')
+                        host, port = getRandomReplica()
+                    else:
+                        logger.debug(f'GET request unsuccessful')
+                        host = response.leaderID.hostname
+                        port = response.leaderID.port
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
+
+            except TTransport.TTransportException as e:
+                logger.debug(f'Experienced error while creating connection to contact ({host}:{port}) to resolve GET')
                 host, port = getRandomReplica()
-            else:
-                host = response.leaderID.hostname
-                port = response.leaderID.port
 
-        except TTransport.TTransportException as e:
-            logger.debug(f'Experienced error while contacting ({host}:{port})')
-            host, port = getRandomReplica()
+            sleep(pauseDurationAfterRetryMS / 1000)
+
+        currentRequestNumber += 1
+
+    raise GetFailureException()
 
 def put(key, value):
     nextRequestIdentifier = getNextRequestIdentifier()
@@ -160,12 +181,11 @@ def putHelper(key, value, clientIdentifier, requestNumber):
                 logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
                 host, port = getRandomReplica()
 
-            sleep(pauseDurationAfterRetryMS / 1000)
+            sleep((pauseDurationAfterRetryMS / 1000) * 2)
 
         currentRequestNumber += 1
 
     raise PutFailureException()
-
 
 def getLeaderInfo():
     leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')
@@ -209,7 +229,7 @@ def getNextRequestIdentifier():
 
 def setNextRequestIdentifier(nextIdentifier):
     nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w')
-    nextIdentifierStr = str(nextIdentifier + 1)
+    nextIdentifierStr = str(nextIdentifier)
     nextIdentifierFileObj.write(nextIdentifierStr)
 
 if __name__ == "__main__":
