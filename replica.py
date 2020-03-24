@@ -272,6 +272,12 @@ class Replica:
         self._logger.debug(f'{self._myID[0]}:{self._myID[1]} is now dying')
         _exit(0)
 
+    def getInformation(self):
+        return { "endpoint": f'{self._myID[0]}:{str(self._myID[1])}', \
+                 "role": f'{str(self._state)}', \
+                 "term": f'{self._currentTerm}', \
+                 "index": f'{len(self._log)}' }
+
     def get(self, key, clientIdentifier, requestNumber):
         response = GetResponse(success=True)
 
