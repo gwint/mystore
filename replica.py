@@ -99,6 +99,7 @@ class Replica:
         self._logger.setLevel(logging.DEBUG)
 
         self._lockHandler = LockHandler(13)
+        self._lockHandler.lockAll()
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -282,6 +283,7 @@ class Replica:
     def start(self):
         if not self._hasOperationStarted:
             self._hasOperationStarted = True
+            self._lockHandler.unlockAll()
 
     def get(self, key, clientIdentifier, requestNumber):
         response = GetResponse(success=True)
