@@ -42,6 +42,14 @@ class LockHandler:
             lockToRelease.release()
             self._perThreadAcquiredLocks[currThreadId].remove(name)
 
+    def lockAll(self):
+        for aLock in self._allStoredLocks:
+            aLock.acquire()
+
+    def unlockAll(self):
+        for aLock in self._allStoredLocks:
+            aLock.release()
+
     def __str__(self):
         return f'Lock Elements: {self._allStoredLocks}'
 
