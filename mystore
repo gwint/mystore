@@ -280,6 +280,9 @@ def getRandomReplica():
 
     return replicaInfo[randrange(len(replicaInfo))]
 
+def start():
+    print("Starting cluster...")
+
 def getNextRequestIdentifier():
     nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME))
     nextIdentifierStr = nextIdentifierFileObj.read().strip()
@@ -297,6 +300,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog=f'{argv[0]}')
     subparsers = parser.add_subparsers(help="sub-command help", dest="command")
 
+    startParser = subparsers.add_parser("start", help="Start operation of the cluster")
+
     killParser = subparsers.add_parser("kill", help="Used to stop a running replica")
     killParser.add_argument("url", help="<host>:<port>")
 
@@ -312,7 +317,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.command == "kill":
+    if args.command == "start":
+        start()
+    elif args.command == "kill":
         killReplica(args.url)
     elif args.command == "members":
         listClusterMembers(args.table)
