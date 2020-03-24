@@ -23,6 +23,7 @@ RPC_TIMEOUT_ENV_VAR_NAME = "CMD_LINE_TOOL_TIMEOUT_MS"
 NUM_REQUEST_RETRIES_ENV_VAR_NAME = "CMD_LINE_TOTAL_NUM_RETRIES_PER_REQUEST"
 REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME = "CMD_LINE_TOOL_REST_PERIOD_BETWEEN_CALLS_MS"
 NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME = "CMD_LINE_TOOL_NUM_REQUEST_RETRY_CYCLES_BEFORE_QUITTING"
+CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE"
 
 from replicaservice import ReplicaService
 
@@ -57,6 +58,52 @@ def killReplica(url):
 
 def listClusterMembers(isTableUsed):
     print(f'Displaying cluster members; tableused={isTableUsed}')
+    clusterInfo = {}
+
+    with open(getenv(CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME)) as membershipFileObj:
+        line = membershipFileObj.readline()
+        while line:
+            host, port = tuple(line.split(':'))
+
+            transport = TSocket.TSocket(host, int(port))
+            transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
+            transport = TTransport.TBufferedTransport(transport)
+
+            try:
+                transport.open()
+
+                try:
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
+                    clusterInfo[(host,int(port))] = client.getInformation()
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        logger.debug(f'Experienced timeout error while attempting to gather information from ({host}:{port})')
+                    else:
+                        logger.debug(f'Experienced a non-timeout error while attempting to gather information from ({host}:{port}): {str(e)}')
+
+                    clusterInfo[(host, int(port))] = None
+
+            except TTransport.TTransportException as e:
+                logger.debug(f'Experienced error while setting up connection to attempt to gather information from ({host}:{port})')
+                clusterInfo[(host, int(port))] = None
+
+            line = membershipFileObj.readline()
+
+    displayClusterInfoInTable(clusterInfo) if isTableUsed else displayClusterInfoWithCommaSep(clusterInfo)
+
+def displayClusterInfoInTable(clusterInfo):
+    pass
+
+def displayClusterInfoWithCommaSep(clusterInfo):
+    for endpoint, replicaInformation in clusterInfo.items():
+        if replicaInformation:
+            print(f'{endpoint[0]},{endpoint[1]},{replicaInformation["role"]},{replicaInformation["term"]},{replicaInformation["index"]};', end='')
+        else:
+            print(f'{endpoint[0]},{endpoint[1]},None;', end='')
+
+    print()
 
 def get(key):
     nextRequestIdentifier = getNextRequestIdentifier()

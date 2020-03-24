@@ -273,7 +273,7 @@ class Replica:
         _exit(0)
 
     def getInformation(self):
-        return { "endpoint": f'{self._myID[0]}:{self._myID[1]}', \
+        return { "endpoint": f'{self._myID[0]}:{str(self._myID[1])}', \
                  "role": f'{str(self._state)}', \
                  "term": f'{self._currentTerm}', \
                  "index": f'{len(self._log)}' }
