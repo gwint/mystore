@@ -87,6 +87,7 @@ class Replica:
         self._currentRequestBeingServiced = None
         self._jobsToRetry = Queue()
         self._noopIndex = None
+        self._hasOperationStarted = False
 
         self._clusterMembership = self._getClusterMembership()
 
@@ -277,6 +278,10 @@ class Replica:
                  "role": f'{str(self._state)}', \
                  "term": f'{self._currentTerm}', \
                  "index": f'{len(self._log)}' }
+
+    def start(self):
+        if not self._hasOperationStarted:
+            self._hasOperationStarted = True
 
     def get(self, key, clientIdentifier, requestNumber):
         response = GetResponse(success=True)
