@@ -78,5 +78,7 @@ service ReplicaService {
                     3:string clientIdentifier,
                     4:i32 requestIdentifier),
 
-    oneway void kill()
+    oneway void kill(),
+
+    map<string, string> getInformation()
 }

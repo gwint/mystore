@@ -237,7 +237,7 @@ class Replica:
             ######################################
             ### Must Remove - Only For Testing ###
             ######################################
-            if self._myID[1] == 5000 or self._myID[1] == 5001:
+            if self._myID[1] == 5000:
                 sleep(0.18)
 
             self._logger.debug(f'Now appending entry ({entry}) to the log')
