@@ -57,7 +57,6 @@ def killReplica(url):
     client.kill()
 
 def listClusterMembers(isTableUsed):
-    print(f'Displaying cluster members; tableused={isTableUsed}')
     clusterInfo = {}
 
     with open(getenv(CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME)) as membershipFileObj:
@@ -94,9 +93,20 @@ def listClusterMembers(isTableUsed):
     displayClusterInfoInTable(clusterInfo) if isTableUsed else displayClusterInfoWithCommaSep(clusterInfo)
 
 def displayClusterInfoInTable(clusterInfo):
-    print("+" + ("-" * 87) + "+")
-    print(f'|{"Endpoint".center(14)}\t|\t{"Role".center(10)}\t|\t{"Term".center(10)}\t|\t{"Index".center(9)}\t|')
-    print("+" + ("-" * 87) + "+")
+    print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
+    print(f'|{"Endpoint".center(23)}|{"Role".center(23)}|{"Term".center(23)}|{"Index".center(23)}|')
+    print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
+
+    for endpoint, replicaInformation in clusterInfo.items():
+        endpointStr = f'http://{endpoint[0]}:{endpoint[1]}'.center(23)
+
+        if replicaInformation:
+            print(f'|{endpointStr}|{replicaInformation["role"].center(23)}|{replicaInformation["term"].center(23)}|{replicaInformation["index"].center(23)}|')
+        else:
+            pass
+
+    print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
+
 
 def displayClusterInfoWithCommaSep(clusterInfo):
     for endpoint, replicaInformation in clusterInfo.items():
