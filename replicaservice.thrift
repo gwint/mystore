@@ -80,5 +80,7 @@ service ReplicaService {
 
     oneway void kill(),
 
-    map<string, string> getInformation()
+    map<string, string> getInformation(),
+
+    oneway void start()
 }
