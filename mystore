@@ -94,7 +94,9 @@ def listClusterMembers(isTableUsed):
     displayClusterInfoInTable(clusterInfo) if isTableUsed else displayClusterInfoWithCommaSep(clusterInfo)
 
 def displayClusterInfoInTable(clusterInfo):
-    pass
+    print("+" + ("-" * 87) + "+")
+    print(f'|{"Endpoint".center(14)}\t|\t{"Role".center(10)}\t|\t{"Term".center(10)}\t|\t{"Index".center(9)}\t|')
+    print("+" + ("-" * 87) + "+")
 
 def displayClusterInfoWithCommaSep(clusterInfo):
     for endpoint, replicaInformation in clusterInfo.items():
