@@ -29,7 +29,7 @@ def areAMajorityGreaterThanOrEqual(numLst, num):
     numForMajority = (len(numLst) // 2) + 1
     numGreaterThanOrEqual = 0
     for currNum in numLst:
-        if num >= currNum:
+        if currNum >= num:
             numGreaterThanOrEqual += 1
 
     return numGreaterThanOrEqual >= numForMajority
@@ -50,6 +50,10 @@ class ReplicaFormatter(logging.Formatter):
         record.term = self._replica.getTerm()
         record.log = self._replica.getLog()
         record.map = self._replica.getMap()
+        record.commitIndex = self._replica.getCommitIndex()
+        record.lastApplied = self._replica.getLastApplied()
+        record.matchIndex = self._replica.getMatchIndex()
+
         return super(ReplicaFormatter, self).format(record)
 
 class Replica:
@@ -82,17 +86,18 @@ class Replica:
         self._clientResponseCache = {}
         self._currentRequestBeingServiced = None
         self._jobsToRetry = Queue()
+        self._noopIndex = None
 
         self._clusterMembership = self._getClusterMembership()
 
         self._logger = logging.getLogger(f'{self._myID}_logger')
         handler = logging.FileHandler(f'{self._myID[0]}:{self._myID[1]}.log')
-        formatter = ReplicaFormatter('%(term)s %(state)s %(asctime)s %(message)s %(log)s %(map)s', self)
+        formatter = ReplicaFormatter('%(term)s %(state)s %(asctime)s %(message)s %(log)s CI: %(commitIndex)s LA: %(lastApplied)s %(map)s %(matchIndex)s', self)
         handler.setFormatter(formatter)
         self._logger.addHandler(handler)
         self._logger.setLevel(logging.DEBUG)
 
-        self._lockHandler = LockHandler(12)
+        self._lockHandler = LockHandler(13)
 
         Thread(target=self._timer).start()
         Thread(target=self._heartbeatSender).start()
@@ -113,6 +118,15 @@ class Replica:
 
     def getMap(self):
         return str(self._map)
+
+    def getCommitIndex(self):
+        return str(self._commitIndex)
+
+    def getLastApplied(self):
+        return str(self._lastApplied)
+
+    def getMatchIndex(self):
+        return str(self._matchIndex)
 
     def requestVote(self, \
                     term, \
@@ -173,12 +187,16 @@ class Replica:
                                        LockNames.LAST_APPLIED_LOCK,
                                        LockNames.LEADER_LOCK, \
                                        LockNames.MAP_LOCK, \
-                                       LockNames.TIMER_LOCK)
+                                       LockNames.TIMER_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK)
 
         self._logger.debug(f'({leaderID.hostname}:{leaderID.port}) is appending an entry ({entry}) to my log.')
 
         if term >= self._currentTerm:
             self._timeLeft = self._timeout
+
+        assert prevLogIndex >= 0
+        assert len(self._log) > 0
 
         if (term < self._currentTerm) or \
                                 (prevLogIndex >= len(self._log)) or \
@@ -194,7 +212,8 @@ class Replica:
                                            LockNames.LAST_APPLIED_LOCK, \
                                            LockNames.LEADER_LOCK, \
                                            LockNames.MAP_LOCK, \
-                                           LockNames.TIMER_LOCK)
+                                           LockNames.TIMER_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK)
             return response
 
         self._state = ReplicaState.FOLLOWER
@@ -209,8 +228,9 @@ class Replica:
                 self._log.pop()
 
         def applyEntry(entry):
-            if not (entry and entry.key):
+            if not (entry):
                 return
+
             self._map[entry.key] = entry.value
 
         if entry:
@@ -220,10 +240,14 @@ class Replica:
             if self._myID[1] == 5000 or self._myID[1] == 5001:
                 sleep(0.18)
 
+            self._logger.debug(f'Now appending entry ({entry}) to the log')
             self._log.append(entry)
 
-        if leaderCommit > self._lastApplied:
-            self._logger.debug(f'Now Applying log entry ({self._log[self._lastApplied+1]}) to state machine')
+        if leaderCommit > self._commitIndex:
+            self._commitIndex = min(leaderCommit, len(self._log)-1)
+
+        if self._commitIndex > self._lastApplied:
+            self._logger.debug(f'Now applying log entry ({self._log[self._lastApplied+1]}) to state machine')
             self._lastApplied += 1
             applyEntry(self._log[self._lastApplied])
 
@@ -239,7 +263,8 @@ class Replica:
                                        LockNames.LAST_APPLIED_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.MAP_LOCK, \
-                                       LockNames.TIMER_LOCK)
+                                       LockNames.TIMER_LOCK, \
+                                       LockNames.COMMIT_INDEX_LOCK)
 
         return response
 
@@ -255,7 +280,9 @@ class Replica:
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.MATCH_INDEX_LOCK, \
+                                       LockNames.LATEST_NO_OP_LOG_INDEX)
 
         self._logger.debug(f'({self._myID[0]}:{self._myID[1]}) now attempting to retrieve value associated with {key}')
 
@@ -271,10 +298,11 @@ class Replica:
                                            LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
                                            LockNames.COMMIT_INDEX_LOCK, \
-                                           LockNames.VOTED_FOR_LOCK)
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK, \
+                                           LockNames.LATEST_NO_OP_LOG_INDEX)
 
             return response
-
 
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)
@@ -282,35 +310,57 @@ class Replica:
 
             try:
                 transport.open()
-                protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                client = ReplicaService.Client(protocol)
+                try:
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
 
-                self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
+                    self._logger.debug(f'Now sending a heartbeat to ({host}:{port})')
 
-                response = client.appendEntry( \
-                                  self._currentTerm, \
-                                  self._getID(self._myID[0], self._myID[1]), \
-                                  len(self._log)-1, \
-                                  self._log[-1].term, \
-                                  None, \
-                                  self._commitIndex)
+                    appendEntryResponse = client.appendEntry( \
+                                      self._currentTerm, \
+                                      self._getID(self._myID[0], self._myID[1]), \
+                                      len(self._log)-1, \
+                                      self._log[-1].term, \
+                                      None, \
+                                      self._commitIndex)
 
-                if response.term > self._currentTerm:
-                    self._state = ReplicaState.FOLLOWER
-                    self._currentTerm = response.term
-                    self._votedFor = ()
-                    response.success = False
-                    break
+                    if appendEntryResponse.term > self._currentTerm:
+                        self._state = ReplicaState.FOLLOWER
+                        self._currentTerm = response.term
+                        self._votedFor = ()
+                        response.success = False
 
-            except TTransport.TTransportException:
-                self._logger.debug(f'Error while attempting to send an empty appendEntry request to ({host}:{port})')
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.LOG_LOCK, \
+                                                       LockNames.COMMIT_INDEX_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LATEST_NO_OP_LOG_INDEX)
+
+                        return response
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        self._logger.debug(f'Timeout occurred while attempting to send heartbeat to replica at ({host}:{port})')
+                    else:
+                        self._logger.debug(f'Error while attempting to send a heartbeat to replica at ({host}:{port}): {str(e)}')
+
+            except TTransport.TTransportException as e:
+                self._logger.debug(f'Error while attempting to open a connection to send an empty appendEntry request to ({host}:{port})')
+
+        if areAMajorityGreaterThanOrEqual(list(self._matchIndex.values()) + [len(self._log)-1], self._noopIndex):
+            response.value = self._map[key.strip()]
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
                                        LockNames.CURR_TERM_LOCK, \
                                        LockNames.LOG_LOCK, \
                                        LockNames.COMMIT_INDEX_LOCK, \
-                                       LockNames.VOTED_FOR_LOCK)
+                                       LockNames.VOTED_FOR_LOCK, \
+                                       LockNames.MATCH_INDEX_LOCK, \
+                                       LockNames.LATEST_NO_OP_LOG_INDEX)
 
         return response
 
@@ -360,10 +410,10 @@ class Replica:
             entryIsFromCurrentTerm = (self._log[relevantEntryIndex].term == self._currentTerm)
 
             response.success = entryIsFromCurrentTerm and \
-                                   areAMajorityGreaterThanOrEqual(self._matchIndex.values(), relevantEntryIndex)
+                         areAMajorityGreaterThanOrEqual(list(self._matchIndex.values()) + [len(self._log)-1], relevantEntryIndex)
 
             self._logger.debug(f'Is this entry from this term? = {entryIsFromCurrentTerm}')
-            self._logger.debug(f'Has the entry been successfully replicated on a majority of replicas {areAMajorityGreaterThanOrEqual(self._matchIndex.values(), relevantEntryIndex)}')
+            self._logger.debug(f'Has the entry been successfully replicated on a majority of replicas {areAMajorityGreaterThanOrEqual(list(self._matchIndex.values()) + [len(self._log)-1], relevantEntryIndex)}')
 
             self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                            LockNames.LEADER_LOCK, \
@@ -429,7 +479,7 @@ class Replica:
 
                 if not appendEntryResponse.success:
                     self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
-                    self._nextIndex[(host,port)] -= 1
+                    self._nextIndex[(host,port)] = max(1, self._nextIndex[(host,port)]-1)
                 else:
                     self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {numServersReplicatedOn} to {numServersReplicatedOn+1})')
                     self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
@@ -549,7 +599,7 @@ class Replica:
                 entry = self._log[job.entryPosition]
 
                 if self._state != ReplicaState.LEADER:
-                    self._jobsToRetry.clear()
+                    self._jobsToRetry = Queue()
                     self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                                    LockNames.LEADER_LOCK, \
                                                    LockNames.CURR_TERM_LOCK, \
@@ -589,7 +639,7 @@ class Replica:
                         self._state = ReplicaState.FOLLOWER
                         self._votedFor = ()
                         response.success = False
-                        self._jobsToRetry.clear()
+                        self._jobsToRetry = Queue()
                         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                                        LockNames.LEADER_LOCK, \
                                                        LockNames.CURR_TERM_LOCK, \
@@ -682,23 +732,28 @@ class Replica:
 
                     try:
                         transport.open()
-                        protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                        client = ReplicaService.Client(protocol)
 
-                        leaderID = self._getID(self._myID[0], self._myID[1])
+                        try:
+                            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                            client = ReplicaService.Client(protocol)
 
-                        ballot = client.requestVote(self._currentTerm, \
-                                                    leaderID, \
-                                                    len(self._log), \
-                                                    self._log[-1].term)
+                            leaderID = self._getID(self._myID[0], self._myID[1])
 
-                        votesReceived += (1 if ballot.voteGranted else 0)
+                            ballot = client.requestVote(self._currentTerm, \
+                                                        leaderID, \
+                                                        len(self._log), \
+                                                        self._log[-1].term)
+
+                            votesReceived += (1 if ballot.voteGranted else 0)
+
+                        except TTransport.TTransportException as e:
+                            if isinstance(e.inner, timeout):
+                                self._logger.debug(f'Timeout occurred while requesting vote from ({host}:{port})')
+                            else:
+                                self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port}): {str(e)}')
 
                     except TTransport.TTransportException as e:
-                        if isinstance(e.inner, timeout):
-                            self._logger.debug(f'Timeout occurred while requesting vote from ({host}:{port})')
-                        else:
-                            self._logger.debug(f'Error while attempting to request a vote from replica at ({host}:{port}): {str(e)}')
+                        self._logger.debug(f'Error while attempting to open a connection to request a vote from replica at ({host}:{port}): {str(e)}')
 
                     self._logger.debug(f'{votesReceived} votes have been received during this election')
 
@@ -706,8 +761,15 @@ class Replica:
                         self._state = ReplicaState.LEADER
                         self._leader = self._myID
 
+                        self._noopIndex = len(self._log)
+                        noopEntry = Entry(key="", \
+                                          value="", \
+                                          term=self._currentTerm)
+
+                        self._log.append(noopEntry)
+
                         for host, port in self._clusterMembership:
-                            self._nextIndex[(host,port)] = len(self._log)
+                            self._nextIndex[(host,port)] = len(self._log)-1
                             self._matchIndex[(host,port)] = 0
 
                             transport = TSocket.TSocket(host, port)
@@ -716,27 +778,41 @@ class Replica:
 
                             try:
                                 transport.open()
-                                protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                                client = ReplicaService.Client(protocol)
 
-                                response = client.appendEntry( \
-                                     self._currentTerm, \
-                                     self._getID(self._myID[0], self._myID[1]), \
-                                     len(self._log)-1, \
-                                     self._log[-1].term, \
-                                     None, \
-                                     self._commitIndex)
+                                try:
+                                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                                    client = ReplicaService.Client(protocol)
 
-                                if response.term > self._currentTerm:
-                                    self._state = ReplicaState.FOLLOWER
-                                    self._currentTerm = response.term
-                                    self._votedFor = ()
+                                    appendEntryResponse = client.appendEntry( \
+                                                        self._currentTerm, \
+                                                        self._getID(self._myID[0], self._myID[1]), \
+                                                        len(self._log)-2, \
+                                                        self._log[-2].term, \
+                                                        noopEntry, \
+                                                        self._commitIndex)
+
+                                    if appendEntryResponse.term > self._currentTerm:
+                                        self._state = ReplicaState.FOLLOWER
+                                        self._currentTerm = response.term
+                                        self._votedFor = ()
+
+                                    if not appendEntryResponse.success:
+                                        self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing nextIndex value from {self._nextIndex[(host,port)]} to {max(1, self._nextIndex[(host,port)]-1)}')
+                                        self._nextIndex[(host,port)] = max(1, self._nextIndex[(host,port)]-1)
+                                    else:
+                                        self._logger.debug(f'AppendEntryRequest containing no-op directed to ({host}:{port}) successful: Increasing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]+1}')
+                                        self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
+                                        self._nextIndex[(host,port)] += 1
+
+                                except TTransport.TTransportException as e:
+                                    if isinstance(e.inner, timeout):
+                                        self._logger.debug(f'Timeout experienced while attempting to assert control over replica at ({host}:{port})')
+                                        self._jobsToRetry.put(Job(len(self._log)-1, host, port))
+                                    else:
+                                        self._logger.debug(f'Error while attempting to assert control over replica at ({host}:{port}): {str(e)}')
 
                             except TTransport.TTransportException as e:
-                                if isinstance(e.inner, timeout):
-                                    self._logger.debug(f'Timeout experienced while attempting to assert control over ({host}:{port})')
-                                else:
-                                    self._logger.debug(f'Error while attempting to send assert control over replica at ({host}:{port}): {str(e)}')
+                                self._logger.debug(f'Error while attempting to establish connection to assert control over replica at ({host}:{port}): {str(e)}')
 
                         self._logger.debug("I have asserted control of the cluster!")
                         break
@@ -778,11 +854,14 @@ class Replica:
                 sleep(0.5)
                 continue
 
+            old = self._commitIndex
             self._commitIndex = self._findUpdatedCommitIndex()
+            if old != self._commitIndex:
+                self._logger.debug(f'Commit Index changed from {old} to {self._commitIndex}: {self._matchIndex}')
 
             if self._commitIndex > self._lastApplied:
                 def applyEntry(entry):
-                    if not (entry and entry.key):
+                    if not entry:
                         return
                     self._map[entry.key] = entry.value
 
@@ -806,38 +885,45 @@ class Replica:
 
                 try:
                     transport.open()
-                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                    client = ReplicaService.Client(protocol)
 
-                    appendEntryResponse = client.appendEntry( \
-                                  self._currentTerm, \
-                                  self._getID(self._myID[0], self._myID[1]), \
-                                  prevLogIndex, \
-                                  prevLogTerm, \
-                                  entryToSend, \
-                                  self._commitIndex)
+                    try:
+                        protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                        client = ReplicaService.Client(protocol)
 
-                    if appendEntryResponse.term > self._currentTerm:
-                        self._state = ReplicaState.FOLLOWER
-                        self._currentTerm = appendEntryResponse.term
-                        self._votedFor = ()
-                        break
+                        appendEntryResponse = client.appendEntry( \
+                                      self._currentTerm, \
+                                      self._getID(self._myID[0], self._myID[1]), \
+                                      prevLogIndex, \
+                                      prevLogTerm, \
+                                      entryToSend, \
+                                      self._commitIndex)
 
-                    if not appendEntryResponse.success:
-                        self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
-                        self._nextIndex[(host,port)] = max(0, self._nextIndex[(host,port)] - 1)
-                    elif entryToSend:
-                        self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) successful: Increasing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]+1}')
-                        self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
-                        self._nextIndex[(host,port)] += 1
-                    else:
-                        self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')
+                        if appendEntryResponse.term > self._currentTerm:
+                            self._state = ReplicaState.FOLLOWER
+                            self._currentTerm = appendEntryResponse.term
+                            self._votedFor = ()
+                            break
+
+                        if not appendEntryResponse.success:
+                            self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
+                            self._nextIndex[(host,port)] = max(0, self._nextIndex[(host,port)] - 1)
+                        elif entryToSend:
+                            self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) successful: Increasing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]+1}')
+                            self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
+                            self._nextIndex[(host,port)] += 1
+                        else:
+                            self._logger.debug(f'AppendEntryRequest (heartbeat) directed to ({host}:{port}) successful')
+
+                    except TTransport.TTransportException as e:
+                        if isinstance(e.inner, timeout):
+                            self._logger.debug(f'Timeout experienced while sending heartbeat to ({host}:{port})')
+                            if entryToSend:
+                                self._jobsToRetry.put(Job(self._nextIndex[(host, port)], host, port))
+                        else:
+                            self._logger.debug(f'Error while attempting to send an appendEntry request to ({host}:{port}) from heartbeatSender: {str(e)}')
 
                 except TTransport.TTransportException as e:
-                    if isinstance(e.inner, timeout):
-                        self._logger.debug(f'Timeout experienced while sending heartbeat to ({host}:{port})')
-                    else:
-                        self._logger.debug(f'Error while attempting to send an appendEntry request to ({host}:{port}) from heartbeatSender: {str(e)}')
+                    self._logger.debug(f'Error while attempting to establish a connection to send an appendEntry request to ({host}:{port}) from heartbeatSender: {str(e)}')
 
             self._lockHandler.releaseLocks(LockNames.CURR_TERM_LOCK, \
                                            LockNames.LOG_LOCK, \
@@ -851,8 +937,10 @@ class Replica:
 
     def _findUpdatedCommitIndex(self):
         possibleNewCommitIndex = len(self._log)-1
+        indices = list(self._matchIndex.values()) + [len(self._log)-1]
         while possibleNewCommitIndex > self._commitIndex:
-            if areAMajorityGreaterThanOrEqual(self._matchIndex.values(), possibleNewCommitIndex) and \
+            self._logger.debug(f'possibleNewCommitIndex: {possibleNewCommitIndex}; {indices}; {areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex)}')
+            if areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex) and \
                                                     self._log[possibleNewCommitIndex].term == self._currentTerm:
                 return possibleNewCommitIndex
 

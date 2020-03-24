@@ -13,3 +13,4 @@ class LockNames(IntEnum):
     LEADER_LOCK = 9
     MAP_LOCK = 10
     CURRENT_REQUEST_ID_LOCK = 11
+    LATEST_NO_OP_LOG_INDEX = 12
