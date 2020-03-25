@@ -67,8 +67,6 @@ class Replica:
     def __init__(self, port):
         load_dotenv()
 
-        self._replicaToReplicaCommPort = port
-
         self._state = ReplicaState.FOLLOWER
         self._currentTerm = 0
         self._log = [self._getEmptyLogEntry()]
