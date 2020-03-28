@@ -283,6 +283,28 @@ def getRandomReplica():
 def start():
     print("Starting cluster...")
 
+    with open(getenv(CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME)) as membershipFileObj:
+        for addr in membershipFileObj.readlines():
+            host, portStr = tuple(addr.split(':'))
+            port = int(portStr)
+
+            transport = TSocket.TSocket(host, port)
+            transport = TTransport.TBufferedTransport(transport)
+
+            try:
+                transport.open()
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
+
+                try:
+                    client.start()
+
+                except TTransport.TTransportException as e:
+                    logger.debug(f'')
+
+            except TTransport.TTransportException as e:
+                logger.debug(f'Experienced transport error while establishing connection to start replica at ({host}:{port}): {str(e)}')
+
 def getNextRequestIdentifier():
     nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME))
     nextIdentifierStr = nextIdentifierFileObj.read().strip()

@@ -64,7 +64,7 @@ class Replica:
     RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS"
     RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT"
 
-    def __init__(self, port):
+    def __init__(self, host, port):
         load_dotenv()
 
         self._state = ReplicaState.FOLLOWER
@@ -77,7 +77,7 @@ class Replica:
         self._timeout = self._getElectionTimeout()
         self._timeLeft = self._timeout
         self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
-        self._myID = ("127.0.0.1", port)
+        self._myID = (host, port)
         self._votedFor = ()
         self._leader = ()
         self._map = {}
@@ -279,6 +279,7 @@ class Replica:
                  "index": f'{len(self._log)}' }
 
     def start(self):
+        print("starting operation...")
         if not self._hasOperationStarted:
             self._hasOperationStarted = True
             self._lockHandler.unlockAll()
@@ -960,18 +961,19 @@ class Replica:
         return possibleNewCommitIndex
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Incorrect usage: try ./replica.py <port number>")
+    if len(sys.argv) != 3:
+        print("Incorrect usage: try ./replica.py <host> <port number>")
         sys.exit(1)
 
-    portStr = sys.argv[1]
+    host = sys.argv[1]
+    portStr = sys.argv[2]
 
     try:
         portToUse = int(portStr)
         print(f'Running on port {portToUse}')
-        replica = Replica(portToUse)
+        replica = Replica(host, portToUse)
 
-        transport = TSocket.TServerSocket(host='127.0.0.1', port=portToUse)
+        transport = TSocket.TServerSocket(host=host, port=portToUse)
         tfactory = TTransport.TBufferedTransportFactory()
         pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
