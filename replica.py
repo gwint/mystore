@@ -965,15 +965,15 @@ if __name__ == "__main__":
         print("Incorrect usage: try ./replica.py <host> <port number>")
         sys.exit(1)
 
-    host = sys.argv[1]
+    aHost = sys.argv[1]
     portStr = sys.argv[2]
 
     try:
         portToUse = int(portStr)
         print(f'Running on port {portToUse}')
-        replica = Replica(host, portToUse)
+        replica = Replica(aHost, portToUse)
 
-        transport = TSocket.TServerSocket(host=host, port=portToUse)
+        transport = TSocket.TServerSocket(host=aHost, port=portToUse)
         tfactory = TTransport.TBufferedTransportFactory()
         pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
@@ -981,6 +981,7 @@ if __name__ == "__main__":
 
         server = TServer.TThreadedServer(processor, transport, tfactory, pfactory)
 
+        print("Now serving")
         server.serve()
 
     except ValueError:

@@ -51,6 +51,7 @@ def killReplica(url):
     transport = TSocket.TSocket(host, port)
     transport = TTransport.TBufferedTransport(transport)
     transport.open()
+
     protocol = TBinaryProtocol.TBinaryProtocol(transport)
     client = ReplicaService.Client(protocol)
 
