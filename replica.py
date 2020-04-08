@@ -973,7 +973,7 @@ if __name__ == "__main__":
         print(f'Running on port {portToUse}')
         replica = Replica(aHost, portToUse)
 
-        transport = TSocket.TServerSocket(host=aHost, port=portToUse)
+        transport = TSocket.TServerSocket(host="0.0.0.0", port=portToUse)
         tfactory = TTransport.TBufferedTransportFactory()
         pfactory = TBinaryProtocol.TBinaryProtocolFactory()
 
