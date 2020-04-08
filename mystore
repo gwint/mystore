@@ -290,6 +290,7 @@ def start():
             port = int(portStr)
 
             transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
             transport = TTransport.TBufferedTransport(transport)
 
             try:
