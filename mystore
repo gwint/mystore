@@ -50,12 +50,21 @@ def killReplica(url):
 
     transport = TSocket.TSocket(host, port)
     transport = TTransport.TBufferedTransport(transport)
-    transport.open()
 
-    protocol = TBinaryProtocol.TBinaryProtocol(transport)
-    client = ReplicaService.Client(protocol)
+    try:
+        transport.open()
 
-    client.kill()
+        protocol = TBinaryProtocol.TBinaryProtocol(transport)
+        client = ReplicaService.Client(protocol)
+
+        try:
+            client.kill()
+
+        except TTransport.TTransportException as e:
+            logger.debug(f'Experienced error while attempting to kill replica at ({host}:{port})')
+
+    except TTransport.TTransportException as e:
+        logger.debug(f'Experienced error while setting up connection to attempt to kill replica at ({host}:{port})')
 
 def listClusterMembers(isTableUsed):
     clusterInfo = {}
@@ -107,7 +116,6 @@ def displayClusterInfoInTable(clusterInfo):
             pass
 
     print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
-
 
 def displayClusterInfoWithCommaSep(clusterInfo):
     for endpoint, replicaInformation in clusterInfo.items():
@@ -282,8 +290,6 @@ def getRandomReplica():
     return replicaInfo[randrange(len(replicaInfo))]
 
 def start():
-    print("Starting cluster...")
-
     with open(getenv(CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME)) as membershipFileObj:
         for addr in membershipFileObj.readlines():
             host, portStr = tuple(addr.split(':'))
@@ -295,14 +301,14 @@ def start():
 
             try:
                 transport.open()
-                protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                client = ReplicaService.Client(protocol)
 
                 try:
+                    protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                    client = ReplicaService.Client(protocol)
                     client.start()
 
                 except TTransport.TTransportException as e:
-                    logger.debug(f'')
+                    logger.debug(f'Experienced error while attempting to start operation of replica at ({host}:{port})')
 
             except TTransport.TTransportException as e:
                 logger.debug(f'Experienced transport error while establishing connection to start replica at ({host}:{port}): {str(e)}')
@@ -358,4 +364,4 @@ if __name__ == "__main__":
         except GetFailureException:
             print("GET Request Failed")
     else:
-        parser.error("No command provided: must be one of (kill, members, put, get)")
+        parser.error("No command provided: must be one of (start, kill, members, put, get)")
