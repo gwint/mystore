@@ -70,6 +70,9 @@ class Iface(object):
     def getInformation(self):
         pass
 
+    def start(self):
+        pass
+
 
 class Client(Iface):
     def __init__(self, iprot, oprot=None):
@@ -268,6 +271,16 @@ class Client(Iface):
             return result.success
         raise TApplicationException(TApplicationException.MISSING_RESULT, "getInformation failed: unknown result")
 
+    def start(self):
+        self.send_start()
+
+    def send_start(self):
+        self._oprot.writeMessageBegin('start', TMessageType.ONEWAY, self._seqid)
+        args = start_args()
+        args.write(self._oprot)
+        self._oprot.writeMessageEnd()
+        self._oprot.trans.flush()
+
 
 class Processor(Iface, TProcessor):
     def __init__(self, handler):
@@ -279,6 +292,7 @@ class Processor(Iface, TProcessor):
         self._processMap["put"] = Processor.process_put
         self._processMap["kill"] = Processor.process_kill
         self._processMap["getInformation"] = Processor.process_getInformation
+        self._processMap["start"] = Processor.process_start
         self._on_message_begin = None
 
     def on_message_begin(self, func):
@@ -426,6 +440,17 @@ class Processor(Iface, TProcessor):
         result.write(oprot)
         oprot.writeMessageEnd()
         oprot.trans.flush()
+
+    def process_start(self, seqid, iprot, oprot):
+        args = start_args()
+        args.read(iprot)
+        iprot.readMessageEnd()
+        try:
+            self._handler.start()
+        except TTransport.TTransportException:
+            raise
+        except Exception:
+            logging.exception('Exception in oneway handler')
 
 # HELPER FUNCTIONS AND STRUCTURES
 
@@ -1239,6 +1264,49 @@ class getInformation_result(object):
 all_structs.append(getInformation_result)
 getInformation_result.thrift_spec = (
     (0, TType.MAP, 'success', (TType.STRING, 'UTF8', TType.STRING, 'UTF8', False), None, ),  # 0
+)
+
+
+class start_args(object):
+
+
+    def read(self, iprot):
+        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
+            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
+            return
+        iprot.readStructBegin()
+        while True:
+            (fname, ftype, fid) = iprot.readFieldBegin()
+            if ftype == TType.STOP:
+                break
+            else:
+                iprot.skip(ftype)
+            iprot.readFieldEnd()
+        iprot.readStructEnd()
+
+    def write(self, oprot):
+        if oprot._fast_encode is not None and self.thrift_spec is not None:
+            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
+            return
+        oprot.writeStructBegin('start_args')
+        oprot.writeFieldStop()
+        oprot.writeStructEnd()
+
+    def validate(self):
+        return
+
+    def __repr__(self):
+        L = ['%s=%r' % (key, value)
+             for key, value in self.__dict__.items()]
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+    def __eq__(self, other):
+        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+    def __ne__(self, other):
+        return not (self == other)
+all_structs.append(start_args)
+start_args.thrift_spec = (
 )
 fix_spec(all_structs)
 del all_structs

@@ -51,6 +51,7 @@ def killReplica(url):
     transport = TSocket.TSocket(host, port)
     transport = TTransport.TBufferedTransport(transport)
     transport.open()
+
     protocol = TBinaryProtocol.TBinaryProtocol(transport)
     client = ReplicaService.Client(protocol)
 
@@ -280,6 +281,32 @@ def getRandomReplica():
 
     return replicaInfo[randrange(len(replicaInfo))]
 
+def start():
+    print("Starting cluster...")
+
+    with open(getenv(CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME)) as membershipFileObj:
+        for addr in membershipFileObj.readlines():
+            host, portStr = tuple(addr.split(':'))
+            port = int(portStr)
+
+            transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
+            transport = TTransport.TBufferedTransport(transport)
+
+            try:
+                transport.open()
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
+
+                try:
+                    client.start()
+
+                except TTransport.TTransportException as e:
+                    logger.debug(f'')
+
+            except TTransport.TTransportException as e:
+                logger.debug(f'Experienced transport error while establishing connection to start replica at ({host}:{port}): {str(e)}')
+
 def getNextRequestIdentifier():
     nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME))
     nextIdentifierStr = nextIdentifierFileObj.read().strip()
@@ -297,6 +324,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog=f'{argv[0]}')
     subparsers = parser.add_subparsers(help="sub-command help", dest="command")
 
+    startParser = subparsers.add_parser("start", help="Start operation of the cluster")
+
     killParser = subparsers.add_parser("kill", help="Used to stop a running replica")
     killParser.add_argument("url", help="<host>:<port>")
 
@@ -312,7 +341,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.command == "kill":
+    if args.command == "start":
+        start()
+    elif args.command == "kill":
         killReplica(args.url)
     elif args.command == "members":
         listClusterMembers(args.table)
