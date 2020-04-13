@@ -113,7 +113,7 @@ def displayClusterInfoInTable(clusterInfo):
         if replicaInformation:
             print(f'|{endpointStr}|{replicaInformation["role"].center(23)}|{replicaInformation["term"].center(23)}|{replicaInformation["index"].center(23)}|')
         else:
-            pass
+            print(f'|{endpointStr}|{"N/A".center(23)}|{"N/A".center(23)}|{"N/A".center(23)}|')
 
     print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
 

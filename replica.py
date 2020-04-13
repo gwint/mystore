@@ -64,7 +64,7 @@ class Replica:
     RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS"
     RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT"
 
-    def __init__(self, host, port):
+    def __init__(self, port):
         load_dotenv()
 
         self._state = ReplicaState.FOLLOWER
@@ -77,7 +77,7 @@ class Replica:
         self._timeout = self._getElectionTimeout()
         self._timeLeft = self._timeout
         self._heartbeatTick = int(getenv(Replica.HEARTBEAT_TICK_ENV_VAR_NAME))
-        self._myID = (host, port)
+        self._myID = (gethostbyname(gethostname()), port)
         self._votedFor = ()
         self._leader = ()
         self._map = {}
@@ -650,7 +650,6 @@ class Replica:
                         self._currentTerm = appendEntryResponse.term
                         self._state = ReplicaState.FOLLOWER
                         self._votedFor = ()
-                        response.success = False
                         self._jobsToRetry = Queue()
                         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                                        LockNames.LEADER_LOCK, \
@@ -695,7 +694,14 @@ class Replica:
                                                        LockNames.MATCH_INDEX_LOCK, \
                                                        LockNames.LOG_LOCK)
                     else:
-                        raise e
+                        self._logger.debug(f'Unexpected exception occurred while attempting to retry appending entry to replica at ({job.targetHost}:{job.targetPort}): {str(e)}')
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.NEXT_INDEX_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LOG_LOCK)
 
                 timeSpentOnCurrentRetryMS += timeoutMS
                 timeoutMS *= 1.5
@@ -805,7 +811,7 @@ class Replica:
 
                                     if appendEntryResponse.term > self._currentTerm:
                                         self._state = ReplicaState.FOLLOWER
-                                        self._currentTerm = response.term
+                                        self._currentTerm = appendEntryResponse.term
                                         self._votedFor = ()
 
                                     if not appendEntryResponse.success:
@@ -961,17 +967,15 @@ class Replica:
         return possibleNewCommitIndex
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 2:
         print("Incorrect usage: try ./replica.py <host> <port number>")
         sys.exit(1)
 
-    aHost = sys.argv[1]
-    portStr = sys.argv[2]
+    portStr = sys.argv[1]
 
     try:
         portToUse = int(portStr)
-        print(f'Running on port {portToUse}')
-        replica = Replica(aHost, portToUse)
+        replica = Replica(portToUse)
 
         transport = TSocket.TServerSocket(host="0.0.0.0", port=portToUse)
         tfactory = TTransport.TBufferedTransportFactory()
@@ -981,7 +985,6 @@ if __name__ == "__main__":
 
         server = TServer.TThreadedServer(processor, transport, tfactory, pfactory)
 
-        print("Now serving")
         server.serve()
 
     except ValueError:
