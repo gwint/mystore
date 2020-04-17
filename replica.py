@@ -234,12 +234,6 @@ class Replica:
             self._map[entry.key] = entry.value
 
         if entry:
-            ######################################
-            ### Must Remove - Only For Testing ###
-            ######################################
-            if self._myID[1] == 5000:
-                sleep(0.18)
-
             self._logger.debug(f'Now appending entry ({entry}) to the log')
             self._log.append(entry)
 
@@ -320,6 +314,7 @@ class Replica:
 
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
             transport = TTransport.TBufferedTransport(transport)
 
             try:
