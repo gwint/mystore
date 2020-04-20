@@ -234,12 +234,6 @@ class Replica:
             self._map[entry.key] = entry.value
 
         if entry:
-            ######################################
-            ### Must Remove - Only For Testing ###
-            ######################################
-            if self._myID[1] == 5000:
-                sleep(0.18)
-
             self._logger.debug(f'Now appending entry ({entry}) to the log')
             self._log.append(entry)
 
@@ -316,8 +310,11 @@ class Replica:
 
             return response
 
+        numReplicasSuccessfullyContacted = 1
+
         for host, port in self._clusterMembership:
             transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(Replica.RPC_TIMEOUT_ENV_VAR_NAME)))
             transport = TTransport.TBufferedTransport(transport)
 
             try:
@@ -353,6 +350,22 @@ class Replica:
 
                         return response
 
+                    if not appendEntryResponse.success:
+                        response.success = False
+
+                        self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                                       LockNames.LEADER_LOCK, \
+                                                       LockNames.CURR_TERM_LOCK, \
+                                                       LockNames.LOG_LOCK, \
+                                                       LockNames.COMMIT_INDEX_LOCK, \
+                                                       LockNames.VOTED_FOR_LOCK, \
+                                                       LockNames.MATCH_INDEX_LOCK, \
+                                                       LockNames.LATEST_NO_OP_LOG_INDEX)
+
+                        return response
+
+                    numReplicasSuccessfullyContacted += 1
+
                 except TTransport.TTransportException as e:
                     if isinstance(e.inner, timeout):
                         self._logger.debug(f'Timeout occurred while attempting to send heartbeat to replica at ({host}:{port})')
@@ -362,8 +375,22 @@ class Replica:
             except TTransport.TTransportException as e:
                 self._logger.debug(f'Error while attempting to open a connection to send an empty appendEntry request to ({host}:{port})')
 
+        if numReplicasSuccessfullyContacted < ((len(self._clusterMembership)+1) // 2) + 1:
+            response.success = False
+
+            self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
+                                           LockNames.LEADER_LOCK, \
+                                           LockNames.CURR_TERM_LOCK, \
+                                           LockNames.LOG_LOCK, \
+                                           LockNames.COMMIT_INDEX_LOCK, \
+                                           LockNames.VOTED_FOR_LOCK, \
+                                           LockNames.MATCH_INDEX_LOCK, \
+                                           LockNames.LATEST_NO_OP_LOG_INDEX)
+
+            return response
+
         if areAMajorityGreaterThanOrEqual(list(self._matchIndex.values()) + [len(self._log)-1], self._noopIndex):
-            response.value = self._map[key.strip()]
+            response.value = self._map.get(key.strip(), "")
 
         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                        LockNames.LEADER_LOCK, \
