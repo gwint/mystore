@@ -335,7 +335,7 @@ class Replica:
 
                     if appendEntryResponse.term > self._currentTerm:
                         self._state = ReplicaState.FOLLOWER
-                        self._currentTerm = response.term
+                        self._currentTerm = appendEntryResponse.term
                         self._votedFor = ()
                         response.success = False
 
