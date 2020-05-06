@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 project(MyStore VERSION 1.0)
 set(CMAKE_CXX_FLAGS "-Wall -pedantic")
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(ThriftGeneratedFiles
@@ -16,5 +16,6 @@ set(ServerFiles replica.cpp lockhandler.cpp)
 
 add_executable(MyStore ${ThriftGeneratedFiles} ${ServerFiles})
 
-target_link_libraries(MyStore thrift)
+target_include_directories(MyStore PRIVATE spdlog/include/)
 
+target_link_libraries(MyStore thrift)
