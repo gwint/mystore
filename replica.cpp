@@ -13,14 +13,15 @@
 
 #include "dotenv.h"
 #include "spdlog/spdlog.h"
+
+#include <thrift/transport/TServerSocket.h>
+#include <thrift/transport/TBufferTransports.h>
 #include <thrift/transport/TSocket.h>
 #include <thrift/transport/TTransport.h>
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TThreadedServer.h>
 
 #include "gen-cpp/replicaservice_types.h"
-
-auto& test = dotenv::env.load_dotenv();
 
 bool
 areAMajorityGreaterThanOrEqual(std::vector<unsigned int> numLst, unsigned int num) {
@@ -144,8 +145,32 @@ Replica::getClusterMembership() {
     return membership;
 }
 
-int main() {
-    Replica replica(5000);
+bool
+Replica::isAtLeastAsUpToDateAs(unsigned int otherLastLogIndex,
+                               unsigned int otherLastLogTerm,
+                               unsigned int myLastLogIndex,
+                               unsigned int myLastLogTerm) {
+
+    return (otherLastLogTerm > myLastLogTerm) || \
+                (otherLastLogTerm == myLastLogTerm && \
+                        otherLastLogIndex >= myLastLogIndex);
+}
+
+int main(int argc, char** argv) {
+    if(argc != 2) {
+        std::cerr << "Incorrect Usage: Try ./MyStore <port-number>\n";
+    }
+
+    unsigned int portToUse = atoi(argv[1]);
+
+    std::shared_ptr<Replica> handler(new Replica(portToUse));
+    std::shared_ptr<apache::thrift::TProcessor> processor(new ReplicaServiceProcessor(handler));
+    std::shared_ptr<apache::thrift::transport::TServerTransport> serverTransport(new apache::thrift::transport::TServerSocket(portToUse));
+    std::shared_ptr<apache::thrift::transport::TTransportFactory> transportFactory(new apache::thrift::transport::TBufferedTransportFactory());
+    std::shared_ptr<apache::thrift::protocol::TProtocolFactory> protocolFactory(new apache::thrift::protocol::TBinaryProtocolFactory());
+
+    apache::thrift::server::TThreadedServer server(processor, serverTransport, transportFactory, protocolFactory);
+    server.serve();
 
     return 0;
 }

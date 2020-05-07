@@ -1,7 +1,7 @@
 #ifndef REPLICA_H
 #define REPLICA_H
 
-#include <map>
+#include <unordered_map>
 #include <utility>
 #include <queue>
 
@@ -40,7 +40,7 @@ class Replica : virtual public ReplicaServiceIf {
         ID myID;
         ID votedFor;
         ID leader;
-        std::map<std::string, std::string> stateMachine;
+        std::unordered_map<std::string, std::string> stateMachine;
         unsigned int currentRequestBeingServiced;
         std::queue<Job> jobsToRetry;
         bool hasOperationStarted;
@@ -51,6 +51,11 @@ class Replica : virtual public ReplicaServiceIf {
         static unsigned int getElectionTimeout();
         static std::vector<ID> getClusterMembership();
 
+        bool isAtLeastAsUpToDateAs(unsigned int,
+                                   unsigned int,
+                                   unsigned int,
+                                   unsigned int);
+
         static const char* MIN_ELECTION_TIMEOUT_ENV_VAR_NAME;
         static const char* MAX_ELECTION_TIMEOUT_ENV_VAR_NAME;
         static const char* CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME;
@@ -60,8 +65,16 @@ class Replica : virtual public ReplicaServiceIf {
 
     public:
         Replica(unsigned int);
+
         ReplicaState getState() const;
         unsigned int getTerm() const;
+        std::vector<Entry> getLog() const;
+        std::unordered_map<std::string, std::string>getStateMachine() const;
+        unsigned int getCommitIndex() const;
+        unsigned int getLastApplied() const;
+        std::map<ID, unsigned int> getMatchIndex() const;
+        std::map<ID, unsigned int> getNextIndex() const;
+
         void requestVote(Ballot&, const int32_t, const ID&, const int32_t, const int32_t);
         void appendEntry(AppendEntryResponse&, const int32_t, const ID&, const int32_t, const int32_t, const Entry&, const int32_t);
         void get(GetResponse&, const std::string&, const std::string&, const int32_t);
