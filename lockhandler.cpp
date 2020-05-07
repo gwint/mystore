@@ -5,7 +5,7 @@
 LockHandler::LockHandler(unsigned int numLocksIn) : numLocks(numLocksIn) {
     this->locks = new pthread_mutex_t[numLocksIn];
 
-    for(int i = 0; i < numLocksIn; ++i) {
+    for(unsigned int i = 0; i < numLocksIn; ++i) {
         pthread_mutex_init(&this->locks[i], NULL);
     }
 }
