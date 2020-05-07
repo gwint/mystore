@@ -13,6 +13,8 @@
 
 #include "dotenv.h"
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/basic_file_sink.h"
+#include "spdlog/pattern_formatter.h"
 
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TBufferTransports.h>
@@ -43,6 +45,17 @@ const char* Replica::HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS";
 const char* Replica::RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS";
 const char* Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT";
 
+void
+ReplicaFormatterFlag::format(const spdlog::details::log_msg &, const std::tm &, spdlog::memory_buf_t &dest) {
+    std::string some_txt = "custom-flag";
+    dest.append(some_txt.data(), some_txt.data() + some_txt.size());
+}
+
+std::unique_ptr<spdlog::custom_flag_formatter>
+ReplicaFormatterFlag::clone() const {
+    return spdlog::details::make_unique<ReplicaFormatterFlag>();
+}
+
 Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       currentTerm(0),
                                       commitIndex(0),
@@ -65,6 +78,18 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     this->myID.port = port;
 
     this->lockHandler.lockAll();
+
+    using spdlog::details::make_unique;
+    auto formatter = make_unique<spdlog::pattern_formatter>();
+    formatter->add_flag<ReplicaFormatterFlag>('r').set_pattern("[%H:%M:%S] %v [%r]");
+    spdlog::set_formatter(std::move(formatter));
+
+    spdlog::info("This is a test message!");
+
+    std::stringstream logFileNameStream;
+    logFileNameStream << this->myID.hostname << ":" << this->myID.port << ".log";
+    auto my_logger = spdlog::basic_logger_mt("file_logger", logFileNameStream.str());
+    my_logger->info("lksfjsfj");
 }
 
 void
@@ -90,6 +115,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 void
 Replica::kill() {
     printf("kill\n");
+    exit(0);
 }
 
 void
@@ -99,7 +125,11 @@ Replica::getInformation(std::map<std::string, std::string> & _return) {
 
 void
 Replica::start() {
-    printf("start\n");
+    std::cout << "starting operation...\n";
+    if(!this->hasOperationStarted) {
+        this->hasOperationStarted = true;
+        this->lockHandler.unlockAll();
+    }
 }
 
 Entry
@@ -156,10 +186,14 @@ Replica::isAtLeastAsUpToDateAs(unsigned int otherLastLogIndex,
                         otherLastLogIndex >= myLastLogIndex);
 }
 
+
+
 int main(int argc, char** argv) {
     if(argc != 2) {
         std::cerr << "Incorrect Usage: Try ./MyStore <port-number>\n";
     }
+
+    spdlog::set_pattern("[%H:%M:%S] [%^%L%$] [thread %t] %v");
 
     unsigned int portToUse = atoi(argv[1]);
 

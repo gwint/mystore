@@ -11,6 +11,12 @@
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
 
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/basic_file_sink.h"
+#include "spdlog/pattern_formatter.h"
+
+class Replica;
+
 struct Job {
     Job(int entryPositionIn,
         std::string targetHostIn,
@@ -22,6 +28,12 @@ struct Job {
     int entryPosition;
     std::string targetHost;
     unsigned int targetPort;
+};
+
+class ReplicaFormatterFlag : public spdlog::custom_flag_formatter {
+    public:
+        void format(const spdlog::details::log_msg &, const std::tm &, spdlog::memory_buf_t &) override;
+        std::unique_ptr<custom_flag_formatter> clone() const override;
 };
 
 class Replica : virtual public ReplicaServiceIf {

@@ -18,7 +18,8 @@ LockHandler::~LockHandler() {
 }
 
 template <typename T, typename... Types>
-void LockHandler::acquireLocks(T lock, Types... rest) {
+void
+LockHandler::acquireLocks(T lock, Types... rest) {
     std::vector<LockName> locksToAcquire;
     LockHandler::collect(&locksToAcquire, lock, rest...);
 
@@ -29,11 +30,13 @@ void LockHandler::acquireLocks(T lock, Types... rest) {
     }
 }
 
-void LockHandler::acquireLocks() {
+void
+LockHandler::acquireLocks() {
 }
 
 template <typename T, typename... Types>
-void LockHandler::releaseLocks(T lock, Types... rest) {
+void
+LockHandler::releaseLocks(T lock, Types... rest) {
     std::vector<LockName> locksToRelease;
     LockHandler::collect(&locksToRelease, lock, rest...);
 
@@ -45,12 +48,21 @@ void LockHandler::releaseLocks(T lock, Types... rest) {
     }
 }
 
-void LockHandler::releaseLocks() {
+void
+LockHandler::releaseLocks() {
 }
 
-void LockHandler::lockAll() {
+void
+LockHandler::lockAll() {
     for(unsigned int i = 0; i < this->numLocks; ++i) {
         pthread_mutex_lock(&this->locks[i]);
+    }
+}
+
+void
+LockHandler::unlockAll() {
+    for(unsigned int i = 0; i < this->numLocks; ++i) {
+        pthread_mutex_unlock(&this->locks[i]);
     }
 }
 
