@@ -6,6 +6,7 @@
 #include <queue>
 
 #include "states.hpp"
+#include "lockhandler.hpp"
 
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
@@ -44,6 +45,7 @@ class Replica : virtual public ReplicaServiceIf {
         std::queue<Job> jobsToRetry;
         bool hasOperationStarted;
         std::vector<ID> clusterMembership;
+        LockHandler lockHandler;
 
         Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();

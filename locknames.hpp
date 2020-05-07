@@ -1,7 +1,7 @@
 #ifndef LOCKNAMES_H
 #define LOCKNAMES_H
 
-enum LockNames {
+enum LockName {
     STATE_LOCK,
     CURR_TERM_LOCK,
     LOG_LOCK,

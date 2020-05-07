@@ -49,7 +49,8 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       timeout(Replica::getElectionTimeout()),
                                       currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                       hasOperationStarted(false),
-                                      clusterMembership(Replica::getClusterMembership()) {
+                                      clusterMembership(Replica::getClusterMembership()),
+                                      lockHandler(13) {
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
 
@@ -61,6 +62,8 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
 
     this->myID.hostname = std::string(ip);
     this->myID.port = port;
+
+    this->lockHandler.lockAll();
 }
 
 void
@@ -100,7 +103,12 @@ Replica::start() {
 
 Entry
 Replica::getEmptyLogEntry() {
-    return Entry();
+    Entry emptyLogEntry;
+    emptyLogEntry.key = "";
+    emptyLogEntry.value = "";
+    emptyLogEntry.term = -1;
+
+    return emptyLogEntry;
 }
 
 unsigned int

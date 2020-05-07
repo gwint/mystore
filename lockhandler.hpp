@@ -16,6 +16,9 @@ class LockHandler {
         void acquireLocks();
         template <typename T, typename... Types> void releaseLocks(T, Types...);
         void releaseLocks();
+        void lockAll();
+        template <typename T> static void collect(std::vector<T>&, T);
+        template <typename T, typename ... Ts> static void collect(std::vector<T>&, T, Ts...);
 };
 
 
