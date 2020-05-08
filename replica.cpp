@@ -45,17 +45,6 @@ const char* Replica::HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS";
 const char* Replica::RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS";
 const char* Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT";
 
-void
-ReplicaFormatterFlag::format(const spdlog::details::log_msg &, const std::tm &, spdlog::memory_buf_t &dest) {
-    std::string some_txt = "custom-flag";
-    dest.append(some_txt.data(), some_txt.data() + some_txt.size());
-}
-
-std::unique_ptr<spdlog::custom_flag_formatter>
-ReplicaFormatterFlag::clone() const {
-    return spdlog::details::make_unique<ReplicaFormatterFlag>();
-}
-
 Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       currentTerm(0),
                                       commitIndex(0),
@@ -68,6 +57,8 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
 
+    this->log.push_back(Replica::getEmptyLogEntry());
+
     char hostBuffer[256];
     gethostname(hostBuffer, sizeof(hostBuffer));
     hostent* hostEntry = gethostbyname(hostBuffer);
@@ -79,17 +70,11 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
 
     this->lockHandler.lockAll();
 
-    using spdlog::details::make_unique;
-    auto formatter = make_unique<spdlog::pattern_formatter>();
-    formatter->add_flag<ReplicaFormatterFlag>('r').set_pattern("[%H:%M:%S] %v [%r]");
-    spdlog::set_formatter(std::move(formatter));
-
-    spdlog::info("This is a test message!");
+    spdlog::set_pattern("[%H:%M:%S] %v");
 
     std::stringstream logFileNameStream;
     logFileNameStream << this->myID.hostname << ":" << this->myID.port << ".log";
-    auto my_logger = spdlog::basic_logger_mt("file_logger", logFileNameStream.str());
-    my_logger->info("lksfjsfj");
+    this->logger = spdlog::basic_logger_mt("file_logger", logFileNameStream.str());
 }
 
 void
@@ -99,7 +84,6 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
 
 void
 Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID& leaderID, const int32_t prevLogIndex, const int32_t prevLogTerm, const Entry& entry, const int32_t leaderCommit) {
-    printf("appendEntry\n");
 }
 
 void
@@ -114,13 +98,33 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
 void
 Replica::kill() {
-    printf("kill\n");
+    std::stringstream idStream;
+    idStream << this->myID.hostname;
+    idStream << ":" << this->myID.port;
+    idStream << " is now dying";
+
+    std::cout << idStream.str() << std::endl;
+
+    this->logMsg(idStream.str());
     exit(0);
 }
 
 void
 Replica::getInformation(std::map<std::string, std::string> & _return) {
-    printf("getInformation\n");
+    std::stringstream roleStream;
+    std::stringstream termStream;
+    std::stringstream indexStream;
+    std::stringstream endpointStream;
+
+    roleStream << this->state;
+    termStream << this->currentTerm;
+    indexStream << this->log.size();
+    endpointStream << this->myID.hostname << ":" << this->myID.port;
+
+    _return["endpoint"] = endpointStream.str();
+    _return["role"] = roleStream.str();
+    _return["term"] = termStream.str();
+    _return["index"] = indexStream.str();
 }
 
 void
@@ -186,14 +190,50 @@ Replica::isAtLeastAsUpToDateAs(unsigned int otherLastLogIndex,
                         otherLastLogIndex >= myLastLogIndex);
 }
 
+void
+Replica::logMsg(std::string message) {
+    std::stringstream stateStream;
+    std::stringstream logStream;
+    std::stringstream stateMachineStream;
 
+    stateStream << this->state;
+    logStream << this->log;
+    stateMachineStream << this->stateMachine;
+
+    std::stringstream displayStr;
+    displayStr << message << " {0} {1} {2}";
+
+    this->logger->info(displayStr.str(),
+                       stateStream.str(),
+                       logStream.str(),
+                       stateMachineStream.str());
+}
+
+unsigned int
+Replica::findUpdatedCommitIndex() {
+    unsigned int possibleNewCommitIndex = this->log.size()-1;
+    std::vector<unsigned int> indices;
+    for(auto const& mapping : this->matchIndex) {
+        indices.push_back(mapping.second);
+    }
+    indices.push_back(this->log.size()-1);
+
+    while(possibleNewCommitIndex > this->commitIndex) {
+        if(areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex) &&
+                      (unsigned)this->log[possibleNewCommitIndex].term == this->currentTerm) {
+            return possibleNewCommitIndex;
+        }
+
+        --possibleNewCommitIndex;
+    }
+
+    return possibleNewCommitIndex;
+}
 
 int main(int argc, char** argv) {
     if(argc != 2) {
         std::cerr << "Incorrect Usage: Try ./MyStore <port-number>\n";
     }
-
-    spdlog::set_pattern("[%H:%M:%S] [%^%L%$] [thread %t] %v");
 
     unsigned int portToUse = atoi(argv[1]);
 

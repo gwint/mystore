@@ -30,12 +30,6 @@ struct Job {
     unsigned int targetPort;
 };
 
-class ReplicaFormatterFlag : public spdlog::custom_flag_formatter {
-    public:
-        void format(const spdlog::details::log_msg &, const std::tm &, spdlog::memory_buf_t &) override;
-        std::unique_ptr<custom_flag_formatter> clone() const override;
-};
-
 class Replica : virtual public ReplicaServiceIf {
 
     private:
@@ -58,8 +52,9 @@ class Replica : virtual public ReplicaServiceIf {
         bool hasOperationStarted;
         std::vector<ID> clusterMembership;
         LockHandler lockHandler;
+        std::shared_ptr<spdlog::logger> logger;
 
-        Entry getEmptyLogEntry();
+        static Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();
         static std::vector<ID> getClusterMembership();
 
@@ -67,6 +62,10 @@ class Replica : virtual public ReplicaServiceIf {
                                    unsigned int,
                                    unsigned int,
                                    unsigned int);
+
+        unsigned int findUpdatedCommitIndex();
+
+        void logMsg(std::string);
 
         static const char* MIN_ELECTION_TIMEOUT_ENV_VAR_NAME;
         static const char* MAX_ELECTION_TIMEOUT_ENV_VAR_NAME;
@@ -78,15 +77,6 @@ class Replica : virtual public ReplicaServiceIf {
     public:
         Replica(unsigned int);
 
-        ReplicaState getState() const;
-        unsigned int getTerm() const;
-        std::vector<Entry> getLog() const;
-        std::unordered_map<std::string, std::string>getStateMachine() const;
-        unsigned int getCommitIndex() const;
-        unsigned int getLastApplied() const;
-        std::map<ID, unsigned int> getMatchIndex() const;
-        std::map<ID, unsigned int> getNextIndex() const;
-
         void requestVote(Ballot&, const int32_t, const ID&, const int32_t, const int32_t);
         void appendEntry(AppendEntryResponse&, const int32_t, const ID&, const int32_t, const int32_t, const Entry&, const int32_t);
         void get(GetResponse&, const std::string&, const std::string&, const int32_t);
@@ -95,5 +85,62 @@ class Replica : virtual public ReplicaServiceIf {
         void start();
         void getInformation(std::map<std::string, std::string> &);
 };
+
+std::ostream&
+operator<<(std::ostream& os, const std::unordered_map<std::string, std::string>& stateMachine) {
+    os << "[";
+    for(auto const& mapping : stateMachine) {
+        os << mapping.first << "=>" << mapping.second << ", ";
+    }
+    os << "]";
+
+    return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const std::vector<Entry>& log) {
+    os << "[";
+    for(const Entry& entry : log) {
+        os << "(";
+        if(entry.key.size() == 0) {
+            os << "\"\"=>\"\"";
+        }
+        else {
+            os << entry.key << " => " << entry.value;
+        }
+
+        os << ";" << entry.term << ";";
+        if(entry.clientIdentifier.size() == 0) {
+            os << "\"\"";
+        }
+        else {
+            os << entry.clientIdentifier;
+        }
+
+        os << ";" << entry.requestIdentifier;
+
+        os << "),";
+    }
+    os << "]";
+
+    return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const ReplicaState& state) {
+    switch(state) {
+        case ReplicaState::LEADER:
+            os << "LEADER";
+            break;
+        case ReplicaState::CANDIDATE:
+            os << "CANDIDATE";
+            break;
+        case ReplicaState::FOLLOWER:
+            os << "FOLLOWER";
+            break;
+    };
+
+    return os;
+}
 
 #endif

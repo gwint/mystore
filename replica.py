@@ -986,7 +986,7 @@ class Replica:
         while possibleNewCommitIndex > self._commitIndex:
             self._logger.debug(f'possibleNewCommitIndex: {possibleNewCommitIndex}; {indices}; {areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex)}')
             if areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex) and \
-                                                    self._log[possibleNewCommitIndex].term == self._currentTerm:
+                                   self._log[possibleNewCommitIndex].term == self._currentTerm:
                 return possibleNewCommitIndex
 
             possibleNewCommitIndex -= 1
