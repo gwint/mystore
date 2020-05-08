@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <utility>
 #include <queue>
+#include <thread>
 
 #include "states.hpp"
 #include "lockhandler.hpp"
@@ -53,6 +54,7 @@ class Replica : virtual public ReplicaServiceIf {
         std::vector<ID> clusterMembership;
         LockHandler lockHandler;
         std::shared_ptr<spdlog::logger> logger;
+        unsigned int noopIndex;
 
         static Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();
@@ -85,6 +87,8 @@ class Replica : virtual public ReplicaServiceIf {
         void kill();
         void start();
         void getInformation(std::map<std::string, std::string> &);
+
+        void timer(int);
 };
 
 std::ostream&
@@ -101,26 +105,12 @@ operator<<(std::ostream& os, const std::unordered_map<std::string, std::string>&
 std::ostream&
 operator<<(std::ostream& os, const std::vector<Entry>& log) {
     os << "[";
-    for(const Entry& entry : log) {
-        os << "(";
-        if(entry.key.size() == 0) {
-            os << "\"\"=>\"\"";
-        }
-        else {
-            os << entry.key << " => " << entry.value;
-        }
+    for(unsigned int i = 0; i < log.size(); ++i) {
+        os << log[i];
 
-        os << ";" << entry.term << ";";
-        if(entry.clientIdentifier.size() == 0) {
-            os << "\"\"";
+        if(i < log.size()) {
+            os << ", ";
         }
-        else {
-            os << entry.clientIdentifier;
-        }
-
-        os << ";" << entry.requestIdentifier;
-
-        os << "),";
     }
     os << "]";
 
@@ -142,12 +132,6 @@ operator<<(std::ostream& os, const ReplicaState& state) {
     };
 
     return os;
-}
-
-bool
-operator==(const ID& id1, const ID& id2) {
-    return (id1.hostname == id2.hostname) &&
-           (id1.port == id2.port);
 }
 
 #endif

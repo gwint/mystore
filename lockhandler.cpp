@@ -17,6 +17,7 @@ LockHandler::~LockHandler() {
     delete[] this->locks;
 }
 
+/*
 template <typename T, typename... Types>
 void
 LockHandler::releaseLocks(T lock, Types... rest) {
@@ -30,6 +31,7 @@ LockHandler::releaseLocks(T lock, Types... rest) {
         pthread_mutex_unlock(&this->locks[lockName]);
     }
 }
+*/
 
 void
 LockHandler::lockAll() {

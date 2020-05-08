@@ -5,6 +5,7 @@
 #include <limits>
 #include <fstream>
 #include <sstream>
+#include <chrono>
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
@@ -24,6 +25,9 @@
 #include <thrift/server/TThreadedServer.h>
 
 #include "gen-cpp/replicaservice_types.h"
+#include "gen-cpp/ReplicaService.h"
+
+using apache::thrift::transport::TTransportException;
 
 bool
 areAMajorityGreaterThanOrEqual(std::vector<unsigned int> numLst, unsigned int num) {
@@ -55,7 +59,8 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                       hasOperationStarted(false),
                                       clusterMembership(Replica::getClusterMembership()),
-                                      lockHandler(13) {
+                                      lockHandler(13),
+                                      noopIndex(0) {
 
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
@@ -78,11 +83,52 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     std::stringstream logFileNameStream;
     logFileNameStream << this->myID.hostname << ":" << this->myID.port << ".log";
     this->logger = spdlog::basic_logger_mt("file_logger", logFileNameStream.str());
+
+    std::thread th(&Replica::timer, this, 0);
 }
 
 void
 Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID, const int32_t lastLogIndex, const int32_t lastLogTerm) {
-    printf("requestVote\n");
+    int ballotTerm = -1;
+    bool voteGranted = false;
+
+    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
+                                   LockName::LOG_LOCK,
+                                   LockName::STATE_LOCK,
+                                   LockName::VOTED_FOR_LOCK);
+
+    std::stringstream msg;
+    msg << candidateID << " is requesting my vote.";
+    this->logMsg(msg.str());
+
+    if((unsigned) term > this->currentTerm) {
+        this->state = ReplicaState::FOLLOWER;
+        this->currentTerm = term;
+        this->votedFor = Replica::getNullID();
+    }
+
+    ballotTerm = this->currentTerm;
+
+    if((this->votedFor == candidateID || this->votedFor == Replica::getNullID()) &&
+                this->isAtLeastAsUpToDateAs(lastLogIndex,
+                                            lastLogTerm,
+                                            this->log.size()-1,
+                                            this->log.back().term)) {
+
+        msg.str("");
+        msg << "Granted vote to " << candidateID;
+        this->logMsg(msg.str());
+        voteGranted = true;
+        this->votedFor = candidateID;
+    }
+
+    this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                   LockName::LOG_LOCK,
+                                   LockName::STATE_LOCK,
+                                   LockName::VOTED_FOR_LOCK);
+
+    _return.voteGranted = voteGranted;
+    _return.term = ballotTerm;
 }
 
 void
@@ -99,7 +145,9 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::COMMIT_INDEX_LOCK);
 
     std::stringstream msg;
-    this->logMsg("");
+    msg << "(" << this->leader.hostname << ":" << this->leader.port
+          << ") is appending an entry " << "(" << entry << ") to my log.";
+    this->logMsg(msg.str());
 }
 
 void
@@ -149,6 +197,153 @@ Replica::start() {
     if(!this->hasOperationStarted) {
         this->hasOperationStarted = true;
         this->lockHandler.unlockAll();
+    }
+}
+
+void
+Replica::timer(int args) {
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    while(true) {
+        this->lockHandler.acquireLocks(LockName::STATE_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::CURR_TERM_LOCK,
+                                       LockName::TIMER_LOCK,
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::VOTED_FOR_LOCK,
+                                       LockName::LEADER_LOCK,
+                                       LockName::NEXT_INDEX_LOCK,
+                                       LockName::MATCH_INDEX_LOCK);
+
+        if(this->state == ReplicaState::LEADER) {
+            this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                           LockName::LOG_LOCK,
+                                           LockName::CURR_TERM_LOCK,
+                                           LockName::TIMER_LOCK,
+                                           LockName::COMMIT_INDEX_LOCK,
+                                           LockName::VOTED_FOR_LOCK,
+                                           LockName::LEADER_LOCK,
+                                           LockName::NEXT_INDEX_LOCK,
+                                           LockName::MATCH_INDEX_LOCK);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            continue;
+        }
+
+        if(this->timeLeft == 0) {
+            this->logMsg("Time has expired!");
+
+            unsigned int votesReceived = 1;
+            this->state = ReplicaState::CANDIDATE;
+            this->votedFor = this->myID;
+            this->timeLeft = this->timeout;
+            ++(this->currentTerm);
+
+            for(auto const& id : this->clusterMembership) {
+                std::stringstream msg("Now requesting vote from ");
+                msg << id;
+                this->logMsg(msg.str());
+                std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+                socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+                std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+                ReplicaServiceClient client(protocol);
+
+                try {
+                    transport->open();
+
+                    try {
+                        Ballot ballot;
+                        client.requestVote(ballot,
+                                           this->currentTerm,
+                                           this->leader,
+                                           this->log.size(),
+                                           this->log.back().term);
+
+                        if(ballot.voteGranted) {
+                            ++votesReceived;
+                        }
+                    }
+                    catch(apache::thrift::transport::TTransportException& e) {
+                        if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                            msg.str("");
+                            msg << "Timeout occurred while requesting a vote from " << id;
+                            this->logMsg(msg.str());
+                        }
+                        else {
+                            msg.str("");
+                            msg << "Error while attempting to request a vote from " << id;
+                            this->logMsg(msg.str());
+                        }
+                    }
+                }
+                catch(apache::thrift::transport::TTransportException& e) {
+                    msg.str("");
+                    msg << "Error while attempting to open a connection to request a vote from replica at " << id << ":" << e.getType();
+                    this->logMsg(msg.str());
+                }
+
+                msg.str("");
+                msg << votesReceived << " votes have been received during this election";
+                this->logMsg(msg.str());
+
+                if(votesReceived >= ((this->clusterMembership.size()+1) / 2) + 1) {
+                    this->state = ReplicaState::LEADER;
+                    this->leader = this->myID;
+                    this->noopIndex = this->log.size();
+                    Entry noopEntry;
+                    noopEntry.key = "";
+                    noopEntry.value = "";
+                    noopEntry.term = 0;
+                    noopEntry.clientIdentifier = "";
+                    noopEntry.requestIdentifier = 0;
+                    this->log.push_back(noopEntry);
+
+                    for(auto const& id : this->clusterMembership) {
+                        this->nextIndex[id] = this->log.size()-1;
+                        this->matchIndex[id] = 0;
+
+                        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+                        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+                        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+                        ReplicaServiceClient client(protocol);
+
+                        try {
+                            transport->open();
+
+                            try {
+                                AppendEntryResponse appendEntryResponse;
+                                client.appendEntry(appendEntryResponse,
+                                                   this->currentTerm,
+                                                   this->myID,
+                                                   this->log.size()-2,
+                                                   -1,
+                                                   noopEntry,
+                                                   this->commitIndex);
+                            }
+                            catch(TTransportException& e) {
+                                if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                                    msg.str("");
+                                    msg << "Timeout occurred while requesting a vote from " << id;
+                                    this->logMsg(msg.str());
+                                }
+                                else {
+                                    msg.str("");
+                                    msg << "Error while attempting to request a vote from " << id;
+                                    this->logMsg(msg.str());
+                                }
+                            }
+                        }
+                        catch(TTransportException& e) {
+                            msg.str("");
+                            msg << "Error while attempting to open a connection to request a vote from replica at " << id << ":" << e.getType();
+                            this->logMsg(msg.str());
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -253,6 +448,11 @@ Replica::getNullID() {
     nullID.port = 0;
 
     return nullID;
+}
+
+bool
+ID::operator<(const ID& other) const {
+    return this < &other;
 }
 
 int main(int argc, char** argv) {

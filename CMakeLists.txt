@@ -20,3 +20,4 @@ target_include_directories(MyStore PRIVATE spdlog/include/)
 target_include_directories(MyStore PRIVATE cpp-dotenv/)
 
 target_link_libraries(MyStore thrift)
+target_link_libraries(MyStore pthread)

@@ -36,6 +36,20 @@ LockHandler::acquireLocks(T lock, Types... rest) {
     }
 }
 
+template <typename T, typename... Types>
+void
+LockHandler::releaseLocks(T lock, Types... rest) {
+    std::vector<LockName> locksToRelease;
+    LockHandler::collect(locksToRelease, lock, rest...);
+
+    std::sort(locksToRelease.begin(), locksToRelease.end());
+    std::reverse(locksToRelease.begin(), locksToRelease.end());
+
+    for(LockName lockName : locksToRelease) {
+        pthread_mutex_unlock(&this->locks[lockName]);
+    }
+}
+
 template <typename T, typename ... Ts>
 void LockHandler::collect(std::vector<T>& lst, T first, Ts ... rest) {
     lst.push_back(first);
