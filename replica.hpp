@@ -57,6 +57,7 @@ class Replica : virtual public ReplicaServiceIf {
         static Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();
         static std::vector<ID> getClusterMembership();
+        static ID getNullID();
 
         bool isAtLeastAsUpToDateAs(unsigned int,
                                    unsigned int,
@@ -141,6 +142,12 @@ operator<<(std::ostream& os, const ReplicaState& state) {
     };
 
     return os;
+}
+
+bool
+operator==(const ID& id1, const ID& id2) {
+    return (id1.hostname == id2.hostname) &&
+           (id1.port == id2.port);
 }
 
 #endif

@@ -50,10 +50,13 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       commitIndex(0),
                                       lastApplied(0),
                                       timeout(Replica::getElectionTimeout()),
+                                      votedFor(Replica::getNullID()),
+                                      leader(Replica::getNullID()),
                                       currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                       hasOperationStarted(false),
                                       clusterMembership(Replica::getClusterMembership()),
                                       lockHandler(13) {
+
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
 
@@ -84,6 +87,19 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
 
 void
 Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID& leaderID, const int32_t prevLogIndex, const int32_t prevLogTerm, const Entry& entry, const int32_t leaderCommit) {
+    _return.success = true;
+
+    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
+                                   LockName::LOG_LOCK,
+                                   LockName::STATE_LOCK,
+                                   LockName::LAST_APPLIED_LOCK,
+                                   LockName::LEADER_LOCK,
+                                   LockName::MAP_LOCK,
+                                   LockName::TIMER_LOCK,
+                                   LockName::COMMIT_INDEX_LOCK);
+
+    std::stringstream msg;
+    this->logMsg("");
 }
 
 void
@@ -228,6 +244,15 @@ Replica::findUpdatedCommitIndex() {
     }
 
     return possibleNewCommitIndex;
+}
+
+ID
+Replica::getNullID() {
+    ID nullID;
+    nullID.hostname = "";
+    nullID.port = 0;
+
+    return nullID;
 }
 
 int main(int argc, char** argv) {

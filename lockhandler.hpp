@@ -3,6 +3,9 @@
 
 #include <pthread.h>
 #include <vector>
+#include <algorithm>
+
+#include "locknames.hpp"
 
 class LockHandler {
     private:
@@ -13,14 +16,35 @@ class LockHandler {
         LockHandler(unsigned int);
         ~LockHandler();
         template <typename T, typename... Types> void acquireLocks(T, Types...);
-        void acquireLocks();
         template <typename T, typename... Types> void releaseLocks(T, Types...);
-        void releaseLocks();
         void lockAll();
         void unlockAll();
         template <typename T> static void collect(std::vector<T>&, T);
         template <typename T, typename ... Ts> static void collect(std::vector<T>&, T, Ts...);
 };
 
+template <typename T, typename... Types>
+void
+LockHandler::acquireLocks(T lock, Types... rest) {
+    std::vector<LockName> locksToAcquire;
+    LockHandler::collect(locksToAcquire, lock, rest...);
+
+    std::sort(locksToAcquire.begin(), locksToAcquire.end());
+
+    for(LockName lockName : locksToAcquire) {
+        pthread_mutex_lock(&this->locks[lockName]);
+    }
+}
+
+template <typename T, typename ... Ts>
+void LockHandler::collect(std::vector<T>& lst, T first, Ts ... rest) {
+    lst.push_back(first);
+    LockHandler::collect(lst, rest...);
+}
+
+template <typename T>
+void LockHandler::collect(std::vector<T>& lst, T only) {
+    lst.push_back(only);
+}
 
 #endif
