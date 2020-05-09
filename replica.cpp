@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <chrono>
+#include <stdlib.h>
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
@@ -87,7 +88,7 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
 
     this->lockHandler.lockAll();
 
-    spdlog::set_pattern("[%H:%M:%S] %v");
+    spdlog::set_pattern("[%H:%M:%S:%e] %v");
 
     std::stringstream logFileNameStream;
     logFileNameStream << this->myID.hostname << ":" << this->myID.port << ".log";
@@ -255,7 +256,8 @@ Replica::timer(int args) {
             ++(this->currentTerm);
 
             for(auto const& id : this->clusterMembership) {
-                std::stringstream msg("Now requesting vote from ");
+                std::stringstream msg;
+                msg << "Now requesting vote from ";
                 msg << id;
                 this->logMsg(msg.str());
                 std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
@@ -416,7 +418,7 @@ Replica::getElectionTimeout() {
     unsigned int minTimeMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
     unsigned int maxTimeMS = atoi(dotenv::env[Replica::MAX_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
 
-    srand(100);
+    srand(time(0));
 
     return (rand() % (maxTimeMS - minTimeMS)) + minTimeMS;
 }
