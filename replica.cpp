@@ -76,6 +76,15 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     this->myID.hostname = std::string(ip);
     this->myID.port = port;
 
+    auto it = this->clusterMembership.begin();
+    for(; it != this->clusterMembership.end(); ++it) {
+        if(this->myID == *it) {
+            break;
+        }
+    }
+
+    this->clusterMembership.erase(it);
+
     this->lockHandler.lockAll();
 
     spdlog::set_pattern("[%H:%M:%S] %v");
@@ -83,8 +92,10 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     std::stringstream logFileNameStream;
     logFileNameStream << this->myID.hostname << ":" << this->myID.port << ".log";
     this->logger = spdlog::basic_logger_mt("file_logger", logFileNameStream.str());
+    spdlog::flush_on(spdlog::level::info);
+    spdlog::set_default_logger(this->logger);
 
-    std::thread th(&Replica::timer, this, 0);
+    this->thr = std::thread(&Replica::timer, this, 0);
 }
 
 void
@@ -114,7 +125,6 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
                                             lastLogTerm,
                                             this->log.size()-1,
                                             this->log.back().term)) {
-
         msg.str("");
         msg << "Granted vote to " << candidateID;
         this->logMsg(msg.str());
@@ -133,7 +143,15 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
 
 void
 Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID& leaderID, const int32_t prevLogIndex, const int32_t prevLogTerm, const Entry& entry, const int32_t leaderCommit) {
+
+    std::stringstream msg;
+    msg <<  leaderID << " is appending " << entry << " to my log.";
+    this->logMsg(msg.str());
+
+    this->state = ReplicaState::FOLLOWER;
+    this->timeLeft = 2000000000;
     _return.success = true;
+/*
 
     this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
                                    LockName::LOG_LOCK,
@@ -144,10 +162,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::TIMER_LOCK,
                                    LockName::COMMIT_INDEX_LOCK);
 
-    std::stringstream msg;
-    msg << "(" << this->leader.hostname << ":" << this->leader.port
-          << ") is appending an entry " << "(" << entry << ") to my log.";
-    this->logMsg(msg.str());
+*/
 }
 
 void
@@ -256,7 +271,7 @@ Replica::timer(int args) {
                         Ballot ballot;
                         client.requestVote(ballot,
                                            this->currentTerm,
-                                           this->leader,
+                                           this->myID,
                                            this->log.size(),
                                            this->log.back().term);
 
@@ -314,36 +329,75 @@ Replica::timer(int args) {
 
                             try {
                                 AppendEntryResponse appendEntryResponse;
+                                auto it = this->log.end() - 2;
                                 client.appendEntry(appendEntryResponse,
                                                    this->currentTerm,
                                                    this->myID,
                                                    this->log.size()-2,
-                                                   -1,
+                                                   it->term,
                                                    noopEntry,
                                                    this->commitIndex);
+
+                                if((unsigned) appendEntryResponse.term > this->currentTerm) {
+                                    this->state = ReplicaState::FOLLOWER;
+                                    this->currentTerm = appendEntryResponse.term;
+                                    this->votedFor = Replica::getNullID();
+                                }
+
+                                if(!appendEntryResponse.success) {
+                                    msg.str("");
+                                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
+                                    this->logMsg(msg.str());
+                                    unsigned int possibleNewNextIndex = this->nextIndex[id]-1;
+                                    this->nextIndex[id] = std::max((unsigned) 1, possibleNewNextIndex);
+                                }
+                                else {
+                                    msg.str("");
+                                    msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
+                                    this->logMsg(msg.str());
+                                    this->matchIndex[id] = this->nextIndex[id];
+                                    ++this->nextIndex[id];
+                                }
                             }
                             catch(TTransportException& e) {
                                 if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
                                     msg.str("");
-                                    msg << "Timeout occurred while requesting a vote from " << id;
+                                    msg << "Timeout occurred while asserting control of the replica at " << id;
                                     this->logMsg(msg.str());
                                 }
                                 else {
                                     msg.str("");
-                                    msg << "Error while attempting to request a vote from " << id;
+                                    msg << "Error while attempting to assert control of the replica at " << id;
                                     this->logMsg(msg.str());
                                 }
                             }
                         }
                         catch(TTransportException& e) {
                             msg.str("");
-                            msg << "Error while attempting to open a connection to request a vote from replica at " << id << ":" << e.getType();
+                            msg << "Error while attempting to open a connection to assert control over the replica at " << id << ":" << e.getType();
                             this->logMsg(msg.str());
                         }
                     }
+                    this->logMsg("I have asserted control of the cluster!");
+                    break;
                 }
             }
+
+            this->timeLeft = this->timeout;
         }
+        --this->timeLeft;
+
+        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::CURR_TERM_LOCK,
+                                       LockName::TIMER_LOCK,
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::VOTED_FOR_LOCK,
+                                       LockName::LEADER_LOCK,
+                                       LockName::NEXT_INDEX_LOCK,
+                                       LockName::MATCH_INDEX_LOCK);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 

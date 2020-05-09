@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <iostream>
 
 #include "lockhandler.hpp"
 #include "locknames.hpp"
