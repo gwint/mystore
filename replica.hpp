@@ -89,7 +89,8 @@ class Replica : virtual public ReplicaServiceIf {
         void start();
         void getInformation(std::map<std::string, std::string> &);
 
-        void timer(int);
+        void timer();
+        void heartbeatSender();
 };
 
 std::ostream&

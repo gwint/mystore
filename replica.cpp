@@ -96,7 +96,7 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     spdlog::flush_on(spdlog::level::info);
     spdlog::set_default_logger(this->logger);
 
-    this->thr = std::thread(&Replica::timer, this, 0);
+    this->thr = std::thread(&Replica::timer, this);
 }
 
 void
@@ -217,7 +217,7 @@ Replica::start() {
 }
 
 void
-Replica::timer(int args) {
+Replica::timer() {
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
     while(true) {
@@ -403,6 +403,146 @@ Replica::timer(int args) {
     }
 }
 
+void
+Replica::heartbeatSender() {
+    while(true) {
+        this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::STATE_LOCK,
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::VOTED_FOR_LOCK,
+                                       LockName::NEXT_INDEX_LOCK,
+                                       LockName::MATCH_INDEX_LOCK);
+
+        if(this->state != ReplicaState::LEADER) {
+            this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                           LockName::LOG_LOCK,
+                                           LockName::STATE_LOCK,
+                                           LockName::COMMIT_INDEX_LOCK,
+                                           LockName::VOTED_FOR_LOCK,
+                                           LockName::NEXT_INDEX_LOCK,
+                                           LockName::MATCH_INDEX_LOCK);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            continue;
+        }
+
+        unsigned int old = this->commitIndex;
+        this->commitIndex = this->findUpdatedCommitIndex();
+        if(old != this->commitIndex) {
+            std::stringstream msg;
+            msg << "Commit index changed from " << old << " to " << this->commitIndex;
+            this->logMsg(msg.str());
+        }
+
+        if(this->commitIndex > this->lastApplied) {
+            auto applyEntry = [&](const Entry& entry) {
+                if(entry != Replica::getEmptyLogEntry()) {
+                    this->stateMachine[entry.key] = entry.value;
+                }
+            };
+
+            std::stringstream msg;
+            msg << "Now applying log entry " << this->log[this->lastApplied+1] << " to state machine";
+            this->logMsg(msg.str());
+
+            ++this->lastApplied;
+            applyEntry(this->log[this->lastApplied]);
+        }
+
+        for(const ID& id : this->clusterMembership) {
+            std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+            ReplicaServiceClient client(protocol);
+
+            Entry entryToSend = Replica::getEmptyLogEntry();
+            unsigned int prevLogIndex = this->log.size()-1;
+            unsigned int prevLogTerm = this->log.back().term;
+            if(this->nextIndex[id] < this->log.size()) {
+                unsigned int logIndexToSend = this->nextIndex[id];
+                Entry entryToSend = this->log[logIndexToSend];
+                prevLogIndex = logIndexToSend-1;
+                prevLogTerm = this->log[prevLogIndex].term;
+            }
+
+            try {
+                transport->open();
+
+                try {
+                    AppendEntryResponse appendEntryResponse;
+                    client.appendEntry(appendEntryResponse,
+                                       this->currentTerm,
+                                       this->myID,
+                                       prevLogIndex,
+                                       prevLogTerm,
+                                       entryToSend,
+                                       this->commitIndex);
+
+                    if((unsigned) appendEntryResponse.term > this->currentTerm) {
+                        this->state = ReplicaState::FOLLOWER;
+                        this->currentTerm = appendEntryResponse.term;
+                        this->votedFor = Replica::getNullID();
+                        break;
+                    }
+
+                    std::stringstream msg;
+
+                    if(!appendEntryResponse.success) {
+                        msg.str("");
+                        msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
+                        this->logMsg(msg.str());
+                        unsigned int possibleNewNextIndex = this->nextIndex[id]-1;
+                        this->nextIndex[id] = std::max((unsigned) 0, possibleNewNextIndex);
+                    }
+                    else if(entryToSend != Replica::getEmptyLogEntry()) {
+                        msg.str("");
+                        msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
+                        this->logMsg(msg.str());
+                        this->matchIndex[id] = this->nextIndex[id];
+                        ++this->nextIndex[id];
+                    }
+                    else {
+                        msg.str("");
+                        msg << "AppendEntryRequest (heartbeat) directed to " << id << " successful";
+                        this->logMsg(msg.str());
+                    }
+                }
+
+                catch(TTransportException& e) {
+                    std::stringstream msg;
+                    if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                        msg.str("");
+                        msg << "Timeout occurred while sending a heartbeat to the replica at " << id;
+                        this->logMsg(msg.str());
+                    }
+                    else {
+                        msg.str("");
+                        msg << "Error while attempting to send an AppendEntryRequest to the replica at " << id;
+                        this->logMsg(msg.str());
+                    }
+                }
+            }
+            catch(TTransportException& e) {
+                std::stringstream msg;
+                msg << "Error while attempting to establish a connection to send an appendEntry request to " << id << " from heartbeat sender: " << e.getType();
+                this->logMsg(msg.str());
+            }
+        }
+
+        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::STATE_LOCK,
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::VOTED_FOR_LOCK,
+                                       LockName::NEXT_INDEX_LOCK,
+                                       LockName::MATCH_INDEX_LOCK);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(this->heartbeatTick));
+    }
+}
+
 Entry
 Replica::getEmptyLogEntry() {
     Entry emptyLogEntry;
@@ -511,7 +651,8 @@ ID::operator<(const ID& other) const {
     return this < &other;
 }
 
-int main(int argc, char** argv) {
+int
+main(int argc, char** argv) {
     if(argc != 2) {
         std::cerr << "Incorrect Usage: Try ./MyStore <port-number>\n";
     }
