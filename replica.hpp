@@ -55,7 +55,8 @@ class Replica : virtual public ReplicaServiceIf {
         LockHandler lockHandler;
         std::shared_ptr<spdlog::logger> logger;
         unsigned int noopIndex;
-        std::thread thr;
+        std::thread timerThr;
+        std::thread heartbeatSenderThr;
 
         static Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();
