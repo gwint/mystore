@@ -19,14 +19,7 @@
 class Replica;
 
 struct Job {
-    Job(int entryPositionIn,
-        std::string targetHostIn,
-        unsigned int targetPortIn) :
-                     entryPosition(entryPositionIn),
-                     targetHost(targetHostIn),
-                     targetPort(targetPortIn) {}
-
-    int entryPosition;
+    unsigned int entryPosition;
     std::string targetHost;
     unsigned int targetPort;
 };
@@ -57,6 +50,7 @@ class Replica : virtual public ReplicaServiceIf {
         unsigned int noopIndex;
         std::thread timerThr;
         std::thread heartbeatSenderThr;
+        std::thread retryThr;
 
         static Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();
@@ -92,6 +86,7 @@ class Replica : virtual public ReplicaServiceIf {
 
         void timer();
         void heartbeatSender();
+        void retryRequest();
 };
 
 std::ostream&

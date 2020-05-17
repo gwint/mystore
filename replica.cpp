@@ -99,6 +99,7 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
 
     this->timerThr = std::thread(&Replica::timer, this);
     this->heartbeatSenderThr = std::thread(&Replica::heartbeatSender, this);
+    this->retryThr = std::thread(&Replica::retryRequest, this);
 }
 
 void
@@ -598,7 +599,9 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 std::stringstream msg;
                 msg << "Timeout occurred while attempting to append entry to replica at " << id;
                 this->logMsg(msg.str());
-                // self._jobsToRetry.put(Job(len(self._log)-1, host, port))
+
+                Job retryJob = {(unsigned) this->log.size()-1, id.hostname, (unsigned) id.port};
+                this->jobsToRetry.push(retryJob);
                 continue;
             }
 
@@ -1021,6 +1024,153 @@ Replica::heartbeatSender() {
                                        LockName::MATCH_INDEX_LOCK);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(this->heartbeatTick));
+    }
+}
+
+void
+Replica::retryRequest() {
+    unsigned int maxTimeToSpendRetryingMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+
+    while(true) {
+        while(this->jobsToRetry.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        Job job = this->jobsToRetry.front();
+        this->jobsToRetry.pop();
+
+        unsigned int timeSpentOnCurrentRetryMS = 0;
+        unsigned int timeoutMS = atoi(dotenv::env[Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME].c_str());
+
+        while(timeSpentOnCurrentRetryMS < (0.8 * maxTimeToSpendRetryingMS)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(timeoutMS));
+
+            this->lockHandler.acquireLocks(LockName::STATE_LOCK,
+                                           LockName::LEADER_LOCK,
+                                           LockName::CURR_TERM_LOCK,
+                                           LockName::VOTED_FOR_LOCK,
+                                           LockName::NEXT_INDEX_LOCK,
+                                           LockName::MATCH_INDEX_LOCK,
+                                           LockName::LOG_LOCK);
+
+            Entry entry = this->log.at(job.entryPosition);
+
+            if(this->state != ReplicaState::LEADER) {
+                std::queue<Job> empty;
+                std::swap(this->jobsToRetry, empty);
+
+                this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                               LockName::LEADER_LOCK,
+                                               LockName::CURR_TERM_LOCK,
+                                               LockName::VOTED_FOR_LOCK,
+                                               LockName::NEXT_INDEX_LOCK,
+                                               LockName::MATCH_INDEX_LOCK,
+                                               LockName::LOG_LOCK);
+
+                break;
+            }
+
+            std::stringstream msg;
+            msg << "Retrying AppendEntryRequest " << entry << " after " << timeoutMS << " ms.";
+            this->logMsg(msg.str());
+
+            ID targetID;
+            targetID.hostname = job.targetHost;
+            targetID.port = job.targetPort;
+
+            std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(targetID.hostname, targetID.port));
+            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+
+            std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+            ReplicaServiceClient client(protocol);
+
+            try {
+                transport->open();
+            }
+            catch(TTransportException& e) {
+                std::cout << "Error while attempting to open a connecton to retry an AppendEntryRequest to the replica at " << targetID << std::endl;
+            }
+
+            try {
+                AppendEntryResponse appendEntryResponse;
+                client.appendEntry(appendEntryResponse,
+                                   this->currentTerm,
+                                   this->myID,
+                                   job.entryPosition-1,
+                                   this->log.at(job.entryPosition-1).term,
+                                   entry,
+                                   this->commitIndex);
+
+                if((unsigned) appendEntryResponse.term > this->currentTerm) {
+                    this->currentTerm = appendEntryResponse.term;
+                    this->state = ReplicaState::FOLLOWER;
+                    this->votedFor = Replica::getNullID();
+                    std::queue<Job> empty;
+                    std::swap(this->jobsToRetry, empty);
+
+                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                                   LockName::LEADER_LOCK,
+                                                   LockName::CURR_TERM_LOCK,
+                                                   LockName::VOTED_FOR_LOCK,
+                                                   LockName::NEXT_INDEX_LOCK,
+                                                   LockName::MATCH_INDEX_LOCK,
+                                                   LockName::LOG_LOCK);
+
+                    break;
+                }
+
+                if(!appendEntryResponse.success) {
+                    std::stringstream msg;
+                    msg << "AppendEntryRequest retry to " << targetID << " failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!";
+                    this->logMsg(msg.str());
+
+                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                                   LockName::LEADER_LOCK,
+                                                   LockName::CURR_TERM_LOCK,
+                                                   LockName::VOTED_FOR_LOCK,
+                                                   LockName::NEXT_INDEX_LOCK,
+                                                   LockName::MATCH_INDEX_LOCK,
+                                                   LockName::LOG_LOCK);
+                }
+                else {
+                    std::stringstream msg;
+                    msg << "Entry successfully replicated on " << targetID  << " during retry: Now increasing nextIndex value from " <<
+                                this->nextIndex.at(targetID) << " to " << (this->nextIndex.at(targetID)+1);
+                    this->logMsg(msg.str());
+
+                    this->matchIndex.at(targetID) = this->nextIndex.at(targetID);
+                    ++this->nextIndex.at(targetID);
+
+                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                                   LockName::LEADER_LOCK,
+                                                   LockName::CURR_TERM_LOCK,
+                                                   LockName::VOTED_FOR_LOCK,
+                                                   LockName::NEXT_INDEX_LOCK,
+                                                   LockName::MATCH_INDEX_LOCK,
+                                                   LockName::LOG_LOCK);
+                    break;
+                }
+            }
+            catch(TTransportException& e) {
+                std::stringstream msg;
+                if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                    msg.str("");
+                    msg << "Timeout occurred while retrying an AppendEntryRequest to the replica at " << targetID;
+                    this->logMsg(msg.str());
+                }
+                else {
+                    msg.str("");
+                    msg << "Non-Timeout error while attempting to retry an AppendEntryRequest to the replica at " << targetID;
+                    this->logMsg(msg.str());
+                }
+            }
+
+            timeSpentOnCurrentRetryMS += timeoutMS;
+            timeoutMS = ((double) timeoutMS) * 1.5;
+        }
     }
 }
 
