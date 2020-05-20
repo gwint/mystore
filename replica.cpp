@@ -32,10 +32,10 @@
 using apache::thrift::transport::TTransportException;
 
 bool
-areAMajorityGreaterThanOrEqual(std::vector<unsigned int> numLst, unsigned int num) {
+areAMajorityGreaterThanOrEqual(std::vector<int> numLst, int num) {
     unsigned int numForMajority = (numLst.size() / 2) + 1;
     unsigned int numGreaterThanOrEqual = 0;
-    for(const unsigned int& currNum : numLst) {
+    for(const int& currNum : numLst) {
         if(currNum >= num) {
             ++numGreaterThanOrEqual;
         }
@@ -107,18 +107,16 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
     int ballotTerm = -1;
     bool voteGranted = false;
 
-    std::cout << "Someone is requesting a vote\n";
     this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
                                    LockName::LOG_LOCK,
                                    LockName::STATE_LOCK,
                                    LockName::VOTED_FOR_LOCK);
-    std::cout << "got neccesary locks\n";
 
     std::stringstream msg;
     msg << candidateID << " is requesting my vote.";
     this->logMsg(msg.str());
 
-    if((unsigned) term > this->currentTerm) {
+    if(term > this->currentTerm) {
         this->state = ReplicaState::FOLLOWER;
         this->currentTerm = term;
         this->votedFor = Replica::getNullID();
@@ -150,15 +148,6 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
 void
 Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID& leaderID, const int32_t prevLogIndex, const int32_t prevLogTerm, const Entry& entry, const int32_t leaderCommit) {
 
-/*
-    std::stringstream msg;
-    msg <<  leaderID << " is appending " << entry << " to my log.";
-    this->logMsg(msg.str());
-
-    this->state = ReplicaState::FOLLOWER;
-    this->timeLeft = this->timeout;
-    _return.success = true;
-*/
     _return.success = true;
 
     this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
@@ -174,22 +163,22 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     msg <<  leaderID << " is appending " << entry << " to my log.";
     this->logMsg(msg.str());
 
-    if((unsigned) term >= this->currentTerm) {
+    if(term >= this->currentTerm) {
         this->timeLeft = this->timeout;
     }
 
     assert(prevLogIndex >= 0);
     assert(this->log.size() > 0);
 
-    if(((unsigned) term < this->currentTerm) || ((unsigned) prevLogIndex >= this->log.size()) ||
+    if((term < this->currentTerm) || (prevLogIndex >= this->log.size()) ||
                                 (this->log[prevLogIndex].term != prevLogTerm)) {
         std::stringstream msg;
         msg << "Rejecting appendEntry request from (" << leaderID << "; leaderterm=" << term << ", myterm=" << this->currentTerm << ", prevLogIndex=" << prevLogIndex << ")";
         this->logMsg(msg.str());
 
         _return.success = false;
-        _return.term = std::max((unsigned) term, this->currentTerm);
-        this->currentTerm = std::max((unsigned) term, this->currentTerm);
+        _return.term = std::max(term, this->currentTerm);
+        this->currentTerm = std::max(term, this->currentTerm);
 
         this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
                                        LockName::LOG_LOCK,
@@ -206,7 +195,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     this->state = ReplicaState::FOLLOWER;
 
     unsigned int numEntriesToRemove = 0;
-    for(unsigned int i = this->log.size()-1; i > (unsigned) prevLogIndex; --i) {
+    for(unsigned int i = this->log.size()-1; i > prevLogIndex; --i) {
         ++numEntriesToRemove;
     }
 
@@ -228,9 +217,9 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         this->log.push_back(entry);
     }
 
-    if((unsigned) leaderCommit > this->commitIndex) {
+    if(leaderCommit > this->commitIndex) {
         assert(this->log.size() > 0);
-        this->commitIndex = std::min((unsigned) leaderCommit, (unsigned int) this->log.size()-1);
+        this->commitIndex = std::min(leaderCommit, (int) this->log.size()-1);
     }
 
     auto applyEntry = [&](const Entry& entry) {
@@ -249,7 +238,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     }
 
     this->leader = leaderID;
-    this->currentTerm = std::max((unsigned) term, this->currentTerm);
+    this->currentTerm = std::max(term, this->currentTerm);
     _return.term = this->currentTerm;
 
     this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
@@ -331,11 +320,19 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    Replica::getEmptyLogEntry(),
                                    this->commitIndex);
 
-                if((unsigned) appendEntryResponse.term > this->currentTerm) {
+                msg.str("");
+                msg << "Was AppendEntryRequest successful: " << appendEntryResponse.success;
+                this->logMsg(msg.str());
+
+                if(appendEntryResponse.term > this->currentTerm) {
                     this->state = ReplicaState::FOLLOWER;
                     this->currentTerm = appendEntryResponse.term;
                     this->votedFor = Replica::getNullID();
                     _return.success = false;
+
+                    std::stringstream msg;
+                    msg << "Early exit: Larger term encountered";
+                    this->logMsg(msg.str());
 
                     this->lockHandler.releaseLocks(LockName::STATE_LOCK,
                                                    LockName::LEADER_LOCK,
@@ -349,8 +346,12 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                     return;
                 }
 
-                if(!appendEntryResponse.success) {
+                if(appendEntryResponse.success == false) {
                     _return.success = false;
+
+                    std::stringstream msg;
+                    msg << "Early exit: appendEntryResponse not successful";
+                    this->logMsg(msg.str());
 
                     this->lockHandler.releaseLocks(LockName::STATE_LOCK,
                                                    LockName::LEADER_LOCK,
@@ -389,6 +390,10 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     if(numReplicasSuccessfullyContacted < ((this->clusterMembership.size()+1) / 2) + 1) {
         _return.success = false;
 
+        std::stringstream msg;
+        msg << "Early exit: replication level needed not reached";
+        this->logMsg(msg.str());
+
         this->lockHandler.releaseLocks(LockName::STATE_LOCK,
                                        LockName::LEADER_LOCK,
                                        LockName::CURR_TERM_LOCK,
@@ -401,7 +406,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         return;
     }
 
-    std::vector<unsigned int> matchIndices;
+    std::vector<int> matchIndices;
     for(auto pair : this->matchIndex) {
         matchIndices.push_back(pair.second);
     }
@@ -463,7 +468,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         return;
     }
 
-    if((unsigned) requestIdentifier == this->currentRequestBeingServiced) {
+    if(requestIdentifier == this->currentRequestBeingServiced) {
         std::stringstream msg;
         msg << "Continuing servicing of request " << requestIdentifier;
         this->logMsg(msg.str());
@@ -478,9 +483,9 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
         assert(relevantEntryIndex != 0);
 
-        bool entryIsFromCurrentTerm = ((unsigned) this->log[relevantEntryIndex].term == this->currentTerm);
+        bool entryIsFromCurrentTerm = (this->log[relevantEntryIndex].term == this->currentTerm);
 
-        std::vector<unsigned int> matchIndices;
+        std::vector<int> matchIndices;
         for(auto pair : this->matchIndex) {
             matchIndices.push_back(pair.second);
         }
@@ -556,7 +561,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                newLogEntry,
                                this->commitIndex);
 
-            if((unsigned) appendEntryResponse.term > this->currentTerm) {
+            if(appendEntryResponse.term > this->currentTerm) {
                 this->currentTerm = appendEntryResponse.term;
                 this->state = ReplicaState::FOLLOWER;
                 this->votedFor = Replica::getNullID();
@@ -575,13 +580,13 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 return;
             }
 
-            if(!appendEntryResponse.success) {
+            if(appendEntryResponse.success == false) {
                 std::stringstream msg;
                 msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex[id];
                 this->logMsg(msg.str());
 
                 assert(this->nextIndex[id] > 0);
-                this->nextIndex[id] = std::max((unsigned) 1, this->nextIndex[id]-1);
+                this->nextIndex[id] = std::max(1, this->nextIndex[id]-1);
             }
             else {
                 std::stringstream msg;
@@ -600,7 +605,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 msg << "Timeout occurred while attempting to append entry to replica at " << id;
                 this->logMsg(msg.str());
 
-                Job retryJob = {(unsigned) this->log.size()-1, id.hostname, (unsigned) id.port};
+                Job retryJob = {this->log.size()-1, id.hostname, id.port};
                 this->jobsToRetry.push(retryJob);
                 continue;
             }
@@ -648,8 +653,6 @@ Replica::kill() {
     idStream << this->myID.hostname;
     idStream << ":" << this->myID.port;
     idStream << " is now dying";
-
-    std::cout << idStream.str() << std::endl;
 
     this->logMsg(idStream.str());
     exit(0);
@@ -817,18 +820,18 @@ Replica::timer() {
                                                    noopEntry,
                                                    this->commitIndex);
 
-                                if((unsigned) appendEntryResponse.term > this->currentTerm) {
+                                if(appendEntryResponse.term > this->currentTerm) {
                                     this->state = ReplicaState::FOLLOWER;
                                     this->currentTerm = appendEntryResponse.term;
                                     this->votedFor = Replica::getNullID();
                                 }
 
-                                if(!appendEntryResponse.success) {
+                                if(appendEntryResponse.success == false) {
                                     msg.str("");
                                     msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
                                     this->logMsg(msg.str());
-                                    unsigned int possibleNewNextIndex = this->nextIndex[id]-1;
-                                    this->nextIndex[id] = std::max((unsigned) 1, possibleNewNextIndex);
+                                    int possibleNewNextIndex = this->nextIndex[id]-1;
+                                    this->nextIndex[id] = std::max(1, possibleNewNextIndex);
                                 }
                                 else {
                                     msg.str("");
@@ -942,12 +945,8 @@ Replica::heartbeatSender() {
             unsigned int prevLogTerm = this->log.back().term;
             if(this->nextIndex[id] < this->log.size()) {
                 unsigned int logIndexToSend = this->nextIndex[id];
-                std::cout << "nextIndex.size(): " << this->nextIndex.size() << std::endl;
-                Entry entryToSend = this->log[logIndexToSend];
+                entryToSend = this->log[logIndexToSend];
                 prevLogIndex = logIndexToSend-1;
-                std::cout << "logIndexToSend: " << logIndexToSend << std::endl;
-                std::cout << "prevLogIndex: " << prevLogIndex << std::endl;
-                std::cout << "log len: " << this->log.size() << std::endl;
                 prevLogTerm = this->log[prevLogIndex].term;
             }
 
@@ -964,7 +963,7 @@ Replica::heartbeatSender() {
                                        entryToSend,
                                        this->commitIndex);
 
-                    if((unsigned) appendEntryResponse.term > this->currentTerm) {
+                    if(appendEntryResponse.term > this->currentTerm) {
                         this->state = ReplicaState::FOLLOWER;
                         this->currentTerm = appendEntryResponse.term;
                         this->votedFor = Replica::getNullID();
@@ -973,12 +972,12 @@ Replica::heartbeatSender() {
 
                     std::stringstream msg;
 
-                    if(!appendEntryResponse.success) {
+                    if(appendEntryResponse.success == false) {
                         msg.str("");
                         msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
                         this->logMsg(msg.str());
-                        unsigned int possibleNewNextIndex = this->nextIndex[id]-1;
-                        this->nextIndex[id] = std::max((unsigned) 0, possibleNewNextIndex);
+                        int possibleNewNextIndex = this->nextIndex[id]-1;
+                        this->nextIndex[id] = std::max(0, possibleNewNextIndex);
                     }
                     else if(entryToSend != Replica::getEmptyLogEntry()) {
                         msg.str("");
@@ -1091,7 +1090,9 @@ Replica::retryRequest() {
                 transport->open();
             }
             catch(TTransportException& e) {
-                std::cout << "Error while attempting to open a connecton to retry an AppendEntryRequest to the replica at " << targetID << std::endl;
+                std::stringstream msg;
+                msg << "Error while attempting to open a connecton to retry an AppendEntryRequest to the replica at " << targetID;
+                this->logMsg(msg.str());
             }
 
             try {
@@ -1104,7 +1105,7 @@ Replica::retryRequest() {
                                    entry,
                                    this->commitIndex);
 
-                if((unsigned) appendEntryResponse.term > this->currentTerm) {
+                if(appendEntryResponse.term > this->currentTerm) {
                     this->currentTerm = appendEntryResponse.term;
                     this->state = ReplicaState::FOLLOWER;
                     this->votedFor = Replica::getNullID();
@@ -1122,7 +1123,7 @@ Replica::retryRequest() {
                     break;
                 }
 
-                if(!appendEntryResponse.success) {
+                if(appendEntryResponse.success == false) {
                     std::stringstream msg;
                     msg << "AppendEntryRequest retry to " << targetID << " failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!";
                     this->logMsg(msg.str());
@@ -1180,6 +1181,8 @@ Replica::getEmptyLogEntry() {
     emptyLogEntry.key = "";
     emptyLogEntry.value = "";
     emptyLogEntry.term = -1;
+    emptyLogEntry.clientIdentifier = "";
+    emptyLogEntry.requestIdentifier = 0;
 
     return emptyLogEntry;
 }
@@ -1233,24 +1236,27 @@ Replica::logMsg(std::string message) {
     std::stringstream stateStream;
     std::stringstream logStream;
     std::stringstream stateMachineStream;
+    std::stringstream termStream;
 
     stateStream << this->state;
     logStream << this->log;
     stateMachineStream << this->stateMachine;
+    termStream << this->currentTerm;
 
     std::stringstream displayStr;
-    displayStr << "[{0}] " << message << " {1} {2}";
+    displayStr << "{0} T={1} " << message << " {2} {3}";
 
     this->logger->info(displayStr.str(),
                        stateStream.str(),
+                       termStream.str(),
                        logStream.str(),
                        stateMachineStream.str());
 }
 
 unsigned int
 Replica::findUpdatedCommitIndex() {
-    unsigned int possibleNewCommitIndex = this->log.size()-1;
-    std::vector<unsigned int> indices;
+    int possibleNewCommitIndex = this->log.size()-1;
+    std::vector<int> indices;
     for(auto const& mapping : this->matchIndex) {
         indices.push_back(mapping.second);
     }
@@ -1258,7 +1264,7 @@ Replica::findUpdatedCommitIndex() {
 
     while(possibleNewCommitIndex > this->commitIndex) {
         if(areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex) &&
-                      (unsigned)this->log[possibleNewCommitIndex].term == this->currentTerm) {
+                      this->log[possibleNewCommitIndex].term == this->currentTerm) {
             return possibleNewCommitIndex;
         }
 

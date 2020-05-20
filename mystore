@@ -40,6 +40,9 @@ class PutFailureException(Exception):
 class GetFailureException(Exception):
     pass
 
+def isNullID(id):
+    return (not id.hostname) and id.port == 0
+
 def killReplica(url):
     if ':' not in url or list(url).count(':') != 1:
         print(f'Cannot kill replica at {url}: Invalid format (should be <host>:<port>)')
@@ -150,6 +153,7 @@ def getHelper(key, clientIdentifier, requestNumber):
             transport = TSocket.TSocket(host, port)
             transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
             transport = TTransport.TBufferedTransport(transport)
+
             try:
                 transport.open()
                 try:
@@ -167,7 +171,7 @@ def getHelper(key, clientIdentifier, requestNumber):
 
                         return response.value
 
-                    elif not response.leaderID:
+                    elif isNullID(response.leaderID):
                         logger.debug(f'GET request unsuccessful and current leader is unknown')
                         host, port = getRandomReplica()
                     else:
@@ -233,7 +237,7 @@ def putHelper(key, value, clientIdentifier, requestNumber):
 
                         return True
 
-                    elif not response.leaderID:
+                    elif isNullID(response.leaderID):
                         logger.debug(f'PUT request unsuccessful and current leader is unknown')
                         host, port = getRandomReplica()
                     else:
@@ -286,6 +290,8 @@ def getRandomReplica():
         replicaInfo.append((host, port))
 
         line = replicaInfoFileObj.readline()
+
+    replicaInfoFileObj.close()
 
     return replicaInfo[randrange(len(replicaInfo))]
 

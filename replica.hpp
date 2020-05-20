@@ -19,35 +19,35 @@
 class Replica;
 
 struct Job {
-    unsigned int entryPosition;
+    int entryPosition;
     std::string targetHost;
-    unsigned int targetPort;
+    int targetPort;
 };
 
 class Replica : virtual public ReplicaServiceIf {
 
     private:
         ReplicaState state;
-        unsigned int currentTerm;
-        unsigned int commitIndex;
-        unsigned int lastApplied;
+        int currentTerm;
+        int commitIndex;
+        int lastApplied;
         std::vector<Entry> log;
-        std::map<ID, unsigned int> nextIndex;
-        std::map<ID, unsigned int> matchIndex;
-        unsigned int timeout;
-        unsigned int timeLeft;
-        unsigned int heartbeatTick;
+        std::map<ID, int> nextIndex;
+        std::map<ID, int> matchIndex;
+        int timeout;
+        int timeLeft;
+        int heartbeatTick;
         ID myID;
         ID votedFor;
         ID leader;
         std::unordered_map<std::string, std::string> stateMachine;
-        unsigned int currentRequestBeingServiced;
+        int currentRequestBeingServiced;
         std::queue<Job> jobsToRetry;
         bool hasOperationStarted;
         std::vector<ID> clusterMembership;
         LockHandler lockHandler;
         std::shared_ptr<spdlog::logger> logger;
-        unsigned int noopIndex;
+        int noopIndex;
         std::thread timerThr;
         std::thread heartbeatSenderThr;
         std::thread retryThr;
