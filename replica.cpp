@@ -784,7 +784,7 @@ Replica::timer() {
                     noopEntry.value = "";
                     noopEntry.term = this->currentTerm;
                     noopEntry.clientIdentifier = "";
-                    noopEntry.requestIdentifier = 0;
+                    noopEntry.requestIdentifier = std::numeric_limits<int>::max();
 
                     this->log.push_back(noopEntry);
 
@@ -1172,7 +1172,7 @@ Replica::getEmptyLogEntry() {
     emptyLogEntry.value = "";
     emptyLogEntry.term = -1;
     emptyLogEntry.clientIdentifier = "";
-    emptyLogEntry.requestIdentifier = 0;
+    emptyLogEntry.requestIdentifier = std::numeric_limits<int>::max();
 
     return emptyLogEntry;
 }
@@ -1183,7 +1183,7 @@ Replica::isAnEmptyEntry(const Entry& entry) {
            entry.value == "" &&
            entry.term == -1 &&
            entry.clientIdentifier == "" &&
-           entry.requestIdentifier == 0;
+           entry.requestIdentifier == std::numeric_limits<int>::max();
 }
 
 unsigned int
