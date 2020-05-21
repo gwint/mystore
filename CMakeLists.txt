@@ -21,6 +21,11 @@ ExternalProject_Add(spdlog
     INSTALL_COMMAND ""
 )
 
+execute_process(
+    COMMAND thrift -r --gen cpp replicaservice.thrift
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+)
+
 set(ThriftGeneratedFiles
     /home/gregory/distributed-key-value-store/gen-cpp/ReplicaService.cpp
     /home/gregory/distributed-key-value-store/gen-cpp/replicaservice_types.cpp
