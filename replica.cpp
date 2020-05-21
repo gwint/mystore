@@ -124,7 +124,7 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
 
     ballotTerm = this->currentTerm;
 
-    if((this->votedFor == candidateID || this->votedFor == Replica::getNullID()) &&
+    if((this->votedFor == candidateID || Replica::isANullID(this->votedFor)) &&
                 this->isAtLeastAsUpToDateAs(lastLogIndex,
                                             lastLogTerm,
                                             this->log.size()-1,
@@ -275,7 +275,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
 
         _return.success = false;
         _return.leaderID = Replica::getNullID();
-        if(this->leader != Replica::getNullID()) {
+        if(!Replica::isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
@@ -451,7 +451,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         this->logMsg(msg.str());
 
         _return.success = false;
-        if(this->leader != Replica::getNullID()) {
+        if(!Replica::isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
@@ -1285,6 +1285,11 @@ Replica::getNullID() {
     nullID.port = 0;
 
     return nullID;
+}
+
+bool
+Replica::isANullID(const ID& id) {
+    return id.hostname == "" && id.port == 0;
 }
 
 bool

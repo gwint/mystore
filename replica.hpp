@@ -57,6 +57,7 @@ class Replica : virtual public ReplicaServiceIf {
         static unsigned int getElectionTimeout();
         static std::vector<ID> getClusterMembership();
         static ID getNullID();
+        static bool isANullID(const ID&);
 
         bool isAtLeastAsUpToDateAs(unsigned int,
                                    unsigned int,

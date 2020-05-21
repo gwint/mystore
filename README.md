@@ -4,14 +4,7 @@ is written in C++ and utilizes the Apache Thrift for remote procedure calls.  Th
 consensus algorithm is used to manage the replicated log that holds the mappings stored
 within the system.
 
-## Why a Distributed Key-Value Store?
-
-In short: they provide a reliable way to store important information and allow
-that information to be accessed by applications of varied type and scale.
-etcd is one open-source solution and it serves as the inspiration behind this
-project.
-
-## What is Raft?
+## Raft
 
 Raft is a consensus algorithm that is designed to be easy to understand. It's
 decomposed into relatively independent subproblems, and it cleanly
@@ -40,6 +33,7 @@ $ cd mystore
 $ mkdir build
 $ cd build
 $ cmake ..
+$ make
 ```
 Repeat these steps on each machine that will be apart of the MyStore cluster.
 
