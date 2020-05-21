@@ -35,16 +35,8 @@ at any given moment.
 
 ```
 $ git clone https://github.com/gwint/distributed-key-value-store.git
-```
-```
 $ cd distributed-key-value-store
-```
-```
 $ mkdir build
-```
-```
 $ cd build
-```
-```
 $ cmake ..
 ```
