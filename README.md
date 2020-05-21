@@ -35,8 +35,8 @@ at any given moment.
 ## Installation
 
 ```
-$ git clone https://github.com/gwint/distributed-key-value-store.git
-$ cd distributed-key-value-store
+$ git clone https://github.com/gwint/mystore.git
+$ cd mystore
 $ mkdir build
 $ cd build
 $ cmake ..
@@ -57,7 +57,7 @@ all running locally on ports 5000, 5001, and 5002, respectively.
 
 ## Start up and interact with a MyStore cluster
 
-While inside the distributed-key-value-store directory, runnning ./build/MyStore <port-number> will
+While inside the mystore directory, runnning ./build/MyStore <port-number> will
 start a MyStore node listening on a port represented by <port-number>.  Once this has been done on
 all machines whose information is included in cluster.membership, a command line tool can be used to
 start the cluster's operation and store/retrieve mappings from the cluster.  For example, the following commands
