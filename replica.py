@@ -517,10 +517,12 @@ class Replica:
                     return response
 
                 if not appendEntryResponse.success:
-                    self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
+                    self._logger.debug(f'AppendEntryRequest directed to ({host}:{port}) failed due to log
+ inconsistency: Reducing next index value from {self._nextIndex[(host,port)]} to {self._nextIndex[(host,port)]-1}')
                     self._nextIndex[(host,port)] = max(1, self._nextIndex[(host,port)]-1)
                 else:
-                    self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing replication amount from {numServersReplicatedOn} to {numServersReplicatedOn+1})')
+                    self._logger.debug(f'Entry successfully replicated on ({host}:{port}: Now increasing
+ replication amount from {numServersReplicatedOn} to {numServersReplicatedOn+1})')
                     self._matchIndex[(host,port)] = self._nextIndex[(host,port)]
                     self._nextIndex[(host,port)] += 1
                     numServersReplicatedOn += 1
@@ -689,7 +691,8 @@ class Replica:
                         break
 
                     if not appendEntryResponse.success:
-                        self._logger.debug(f'AppendEntryRequest retry directed to ({job.targetHost}:{job.targetPort}) failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!')
+                        self._logger.debug(f'AppendEntryRequest retry directed to ({job.targetHost}:{job.targetPort})
+ failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!')
                         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                                        LockNames.LEADER_LOCK, \
                                                        LockNames.CURR_TERM_LOCK, \
@@ -698,8 +701,11 @@ class Replica:
                                                        LockNames.MATCH_INDEX_LOCK, \
                                                        LockNames.LOG_LOCK)
                     else:
-                        self._logger.debug(f'Entry successfully replicated on ({job.targetHost}:{job.targetPort}) during retry: Now increasing nextIndex value from {self._nextIndex[(job.targetHost,job.targetPort)]} to {self._nextIndex[(job.targetHost,job.targetPort)]+1}')
-                        self._matchIndex[(job.targetHost,job.targetPort)] = self._nextIndex[(job.targetHost,job.targetPort)]
+                        self._logger.debug(f'Entry successfully replicated on ({job.targetHost}:{job.targetPort})
+ during retry: Now increasing nextIndex value from {self._nextIndex[(job.targetHost,job.targetPort)]} to
+ {self._nextIndex[(job.targetHost,job.targetPort)]+1}')
+                        self._matchIndex[(job.targetHost,job.targetPort)] =
+ self._nextIndex[(job.targetHost,job.targetPort)]
                         self._nextIndex[(job.targetHost,job.targetPort)] += 1
                         self._lockHandler.releaseLocks(LockNames.STATE_LOCK, \
                                                        LockNames.LEADER_LOCK, \
@@ -986,7 +992,7 @@ class Replica:
         while possibleNewCommitIndex > self._commitIndex:
             self._logger.debug(f'possibleNewCommitIndex: {possibleNewCommitIndex}; {indices}; {areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex)}')
             if areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex) and \
-                                                    self._log[possibleNewCommitIndex].term == self._currentTerm:
+                                   self._log[possibleNewCommitIndex].term == self._currentTerm:
                 return possibleNewCommitIndex
 
             possibleNewCommitIndex -= 1

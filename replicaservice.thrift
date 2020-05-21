@@ -14,10 +14,6 @@
  *
  */
 
-union Response {
-    1: GetResponse getResponse,
-    2: PutResponse putResponse
-}
 
 struct Entry {
     1: string key,
