@@ -1,11 +1,8 @@
-<h1 align="center">
-    <br>
-    <img src="https://raft.github.io/logo/annie-solo.png" alt="Raft logo" width="200">
-    <br>
-    Raft - An understandable consensus algorithm
-    <br>
-    <br>
-</h1>
+MyStore is a distributed key-value store for string storage.  It is a decentralized
+system that consists of processes, called nodes, running on serveral machines.  MyStore
+is written in C++ and utilizes the Apache Thrift for remote procedure calls.  The RAFT
+consensus algorithm is used to manage the replicated log that holds the mappings stored
+within the system.
 
 ## Why a Distributed Key-Value Store?
 
@@ -24,19 +21,30 @@ a set of relicas using the Raft consensus algorithm and a series of threads
 used to both perform writes and request snapshots of the mapppings present
 at any given moment.
 
-### Where is consensus needed?
-
-A consensus algorithm is needed in any setting where multiple copies of
-something need to stay in agreement with one another.  NoSQL databases, which
-can utilize replication for increased fault tolerance, provide one venue where
-consensus is required.  MongoDB, for example, manages database replicas in a
-manner mirrors the RAFT consensus algorithm.  Like RAFT, MongoDB seperates
-its a replica set into a single "primary", who is responsible for accepting
-client requests, and a set of "secondaries" which are updated by the primary.
-Also, like RAFT, each mananages a log of operations to perform.  See [this](https://docs.mongodb.com/manual/replication/) for
-more information on how MongoDB handles replication.
-
-## Additional Raft Resources
-
 - [In Search of an Understandable Consensus Algorithm](https://raft.github.io/raft.pdf)
 - [Raft Visualization](https://raft.github.io/)
+
+## Requirements
+
+- C++ >= 14
+- cmake >= 3.17.2
+- Python >= 3.7
+- A Github Account (to pull in external projects for logging and .env file reading during build)
+
+## Installation
+
+```
+$ git clone https://github.com/gwint/distributed-key-value-store.git
+```
+```
+$ cd distributed-key-value-store
+```
+```
+$ mkdir build
+```
+```
+$ cd build
+```
+```
+$ cmake ..
+```
