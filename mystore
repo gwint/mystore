@@ -333,6 +333,10 @@ def start():
         print(f'You must create a cluster.membership file that contains the host:port pairs for all replicas in the cluster')
 
 def getNextRequestIdentifier():
+    if ospath.exists(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME)):
+        with open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w') as nextIdentifierFileObj:
+            nextIdentifierFileObj.write("0\n")
+
     nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME))
     nextIdentifierStr = nextIdentifierFileObj.read().strip()
 
