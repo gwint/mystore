@@ -29,7 +29,8 @@ at any given moment.
 - C++ >= 14
 - cmake >= 3.17.2
 - Python >= 3.7
-- A Github Account (to pull in external projects for logging and .env file reading during build)
+- Apache Thrift version >= 0.13.0
+- A Github Account (to pull in external projects used for logging and .env file reading during build)
 
 ## Installation
 
