@@ -53,3 +53,19 @@ in the file must have the form <ip-address>:<port #>.  For example, the followin
 
 would be the contents of cluster.membership for a cluster consisting of three replicas,
 all running locally on ports 5000, 5001, and 5002, respectively.
+
+## Start up and interact with a MyStore cluster
+
+While inside the distributed-key-value-store directory, runnning ./build/MyStore <port-number> will
+start a MyStore node listening on a port represented by <port-number>.  Once this has been done on
+all machines whose information is included in cluster.membership, a command line tool can be used to
+start the cluster's operation and store/retrieve mappings from the cluster.  For example, the following commands
+will start the cluster, store a key-value pair within the cluster, and then retrieve the value associated with
+the stored key:
+
+```
+$ ./mystore start
+$ ./mystore put akey aval
+$ ./mystore get akey
+```
+
