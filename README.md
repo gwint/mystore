@@ -40,3 +40,16 @@ $ mkdir build
 $ cd build
 $ cmake ..
 ```
+Repeat these steps on each machine that will be apart of the MyStore cluster.
+
+## Determine Cluster Membership
+
+cluster.membership must exist to successfully operate a MyStore cluster.  Each line
+in the file must have the form <ip-address>:<port #>.  For example, the following
+
+    127.0.1.1:5000
+    127.0.1.1:5001
+    127.0.1.1:5002
+
+would be the contents of cluster.membership for a cluster consisting of three replicas,
+all running locally on ports 5000, 5001, and 5002, respectively.
