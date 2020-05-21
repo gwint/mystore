@@ -742,21 +742,18 @@ Replica::timer() {
 
                     try {
                         Ballot ballot;
-                        std::cout << "about to request vote" << std::endl;
+
                         client.requestVote(ballot,
                                            this->currentTerm,
                                            this->myID,
                                            this->log.size(),
                                            this->log.back().term);
-                        std::cout << "just finished requesting vote" << std::endl;
 
                         if(ballot.voteGranted) {
-                            std::cout << "vote granted from " << id << std::endl;
                             ++votesReceived;
                         }
                     }
                     catch(apache::thrift::transport::TTransportException& e) {
-                        std::cout << "timeout experienced\n";
                         if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
                             msg.str("");
                             msg << "Timeout occurred while requesting a vote from " << id;
@@ -791,8 +788,6 @@ Replica::timer() {
                     noopEntry.requestIdentifier = 0;
 
                     this->log.push_back(noopEntry);
-
-                    std::cout << "after noop inclusion, log size is = " << this->log.size() << '\n';
 
                     for(auto const& id : this->clusterMembership) {
                         this->nextIndex[id] = this->log.size()-1;
