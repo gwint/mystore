@@ -53,6 +53,7 @@ class Replica : virtual public ReplicaServiceIf {
         std::thread retryThr;
 
         static Entry getEmptyLogEntry();
+        static bool isAnEmptyEntry(const Entry&);
         static unsigned int getElectionTimeout();
         static std::vector<ID> getClusterMembership();
         static ID getNullID();

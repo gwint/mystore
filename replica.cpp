@@ -209,7 +209,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         }
     }
 
-    if(entry != Replica::getEmptyLogEntry()) {
+    if(!Replica::isAnEmptyEntry(entry)) {
         std::stringstream msg;
         msg << "Now appending " << entry << " to the log";
         this->logMsg(msg.str());
@@ -223,7 +223,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     }
 
     auto applyEntry = [&](const Entry& entry) {
-        if(entry != Replica::getEmptyLogEntry()) {
+        if(!Replica::isAnEmptyEntry(entry)) {
             this->stateMachine[entry.key] = entry.value;
         }
     };
@@ -912,7 +912,7 @@ Replica::heartbeatSender() {
 
         if(this->commitIndex > this->lastApplied) {
             auto applyEntry = [&](const Entry& entry) {
-                if(entry != Replica::getEmptyLogEntry()) {
+                if(!Replica::isAnEmptyEntry(entry)) {
                     this->stateMachine[entry.key] = entry.value;
                 }
             };
@@ -974,7 +974,7 @@ Replica::heartbeatSender() {
                         int possibleNewNextIndex = this->nextIndex[id]-1;
                         this->nextIndex[id] = std::max(0, possibleNewNextIndex);
                     }
-                    else if(entryToSend != Replica::getEmptyLogEntry()) {
+                    else if(!Replica::isAnEmptyEntry(entryToSend)) {
                         msg.str("");
                         msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
                         this->logMsg(msg.str());
@@ -1180,6 +1180,15 @@ Replica::getEmptyLogEntry() {
     emptyLogEntry.requestIdentifier = 0;
 
     return emptyLogEntry;
+}
+
+bool
+Replica::isAnEmptyEntry(const Entry& entry) {
+    return entry.key == "" &&
+           entry.value == "" &&
+           entry.term == -1 &&
+           entry.clientIdentifier == "" &&
+           entry.requestIdentifier == 0;
 }
 
 unsigned int
