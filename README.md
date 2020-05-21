@@ -2,17 +2,7 @@ MyStore is a distributed key-value store for string storage.  It is a decentrali
 system that consists of processes, called nodes, running on serveral machines.  MyStore
 is written in C++ and utilizes the Apache Thrift for remote procedure calls.  The RAFT
 consensus algorithm is used to manage the replicated log that holds the mappings stored
-within the system.
-
-## Raft
-
-Raft is a consensus algorithm that is designed to be easy to understand. It's
-decomposed into relatively independent subproblems, and it cleanly
-addresses all major pieces needed for practical systems.  This project
-includes a distributed key-value store whose mappings are kept consistent across
-a set of relicas using the Raft consensus algorithm and a series of threads
-used to both perform writes and request snapshots of the mapppings present
-at any given moment.
+within the system.  See the below resources for more information about RAFT:
 
 - [In Search of an Understandable Consensus Algorithm](https://raft.github.io/raft.pdf)
 - [Raft Visualization](https://raft.github.io/)

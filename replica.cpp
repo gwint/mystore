@@ -172,7 +172,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
     if((term < this->currentTerm) || (prevLogIndex >= this->log.size()) ||
                                 (this->log[prevLogIndex].term != prevLogTerm)) {
-        std::stringstream msg;
+        msg.str("");
         msg << "Rejecting appendEntry request from (" << leaderID << "; leaderterm=" << term << ", myterm=" << this->currentTerm << ", prevLogIndex=" << prevLogIndex << ")";
         this->logMsg(msg.str());
 
@@ -200,7 +200,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     }
 
     if(numEntriesToRemove > 0) {
-        std::stringstream msg;
+        msg.str("");
         msg << "Now removing " << numEntriesToRemove << " from the back of the log to bring it in line with the leader";
         this->logMsg(msg.str());
 
@@ -210,7 +210,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     }
 
     if(!Replica::isAnEmptyEntry(entry)) {
-        std::stringstream msg;
+        msg.str("");
         msg << "Now appending " << entry << " to the log";
         this->logMsg(msg.str());
 
@@ -229,7 +229,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     };
 
     if(this->commitIndex > this->lastApplied) {
-        std::stringstream msg;
+        msg.str("");
         msg << "Now applying log entry " << this->log[this->lastApplied+1] << " to state machine";
         this->logMsg(msg.str());
 
@@ -306,7 +306,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
             transport->open();
 
             try {
-                std::stringstream msg;
+                msg.str("");
                 msg << "Now sending a heartbeat to " << id;
                 this->logMsg(msg.str());
 
@@ -330,7 +330,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                     this->votedFor = Replica::getNullID();
                     _return.success = false;
 
-                    std::stringstream msg;
+                    msg.str("");
                     msg << "Early exit: Larger term encountered";
                     this->logMsg(msg.str());
 
@@ -349,7 +349,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                 if(appendEntryResponse.success == false) {
                     _return.success = false;
 
-                    std::stringstream msg;
+                    msg.str("");
                     msg << "Early exit: appendEntryResponse not successful";
                     this->logMsg(msg.str());
 
@@ -368,13 +368,12 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                 ++numReplicasSuccessfullyContacted;
             }
             catch(TTransportException& e) {
+                msg.str("");
                 if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                    std::stringstream msg;
                     msg << "Timeout occurred while attempting to send a heartbeat to replica at " << id;
                     this->logMsg(msg.str());
                 }
                 else {
-                    std::stringstream msg;
                     msg << "Error while attempting to send a heartbeat to replica at " << id;
                     this->logMsg(msg.str());
                 }
@@ -390,7 +389,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     if(numReplicasSuccessfullyContacted < ((this->clusterMembership.size()+1) / 2) + 1) {
         _return.success = false;
 
-        std::stringstream msg;
+        msg.str("");
         msg << "Early exit: replication level needed not reached";
         this->logMsg(msg.str());
 
@@ -446,7 +445,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     this->logMsg(msg.str());
 
     if(this->state != ReplicaState::LEADER) {
-        std::stringstream msg;
+        msg.str("");
         msg << "Was contacted to resolve a PUT but am not the leader, redirected to " << this-> leader;
         this->logMsg(msg.str());
 
@@ -469,7 +468,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     }
 
     if(requestIdentifier == this->currentRequestBeingServiced) {
-        std::stringstream msg;
+        msg.str("");
         msg << "Continuing servicing of request " << requestIdentifier;
         this->logMsg(msg.str());
 
@@ -541,14 +540,14 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
             transport->open();
         }
         catch(TTransportException& e) {
-            std::stringstream msg;
+            msg.str("");
             msg << "Error while opening a connection to append an entry to replica at " << id << ":" << e.getType();
             this->logMsg(msg.str());
             continue;
         }
 
         try {
-            std::stringstream msg;
+            msg.str("");
             msg << "Now sending an AppendEntry request to " << id << "; may take a while...";
             this->logMsg(msg.str());
 
@@ -580,8 +579,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 return;
             }
 
+            msg.str("");
             if(appendEntryResponse.success == false) {
-                std::stringstream msg;
                 msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex[id];
                 this->logMsg(msg.str());
 
@@ -589,7 +588,6 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 this->nextIndex[id] = std::max(1, this->nextIndex[id]-1);
             }
             else {
-                std::stringstream msg;
                 msg << "Entry successfully replicated on " << id << ": Now increasing replication aount from " <<
                         numServersReplicatedOn << " to " << (numServersReplicatedOn+1);
                 this->logMsg(msg.str());
@@ -601,7 +599,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         }
         catch(TTransportException& e) {
             if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                std::stringstream msg;
+                msg.str("");
                 msg << "Timeout occurred while attempting to append entry to replica at " << id;
                 this->logMsg(msg.str());
 
@@ -616,15 +614,14 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     _return.leaderID = this->leader;
 
+    msg.str("");
     if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
-        std::stringstream msg;
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
              numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1);
         this->logMsg(msg.str());
         _return.success = false;
     }
     else {
-        std::stringstream msg;
         msg << "Entry successfully replicated on a majority of servers and writing mapping " << key << " => " <<
                 value << " to the state machine";
         this->logMsg(msg.str());
@@ -689,6 +686,8 @@ void
 Replica::timer() {
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
+    std::stringstream msg;
+
     while(true) {
         this->lockHandler.acquireLocks(LockName::STATE_LOCK,
                                        LockName::LOG_LOCK,
@@ -725,7 +724,7 @@ Replica::timer() {
             ++(this->currentTerm);
 
             for(auto const& id : this->clusterMembership) {
-                std::stringstream msg;
+                msg.str("");
                 msg << "Now requesting vote from ";
                 msg << id;
                 this->logMsg(msg.str());
@@ -880,6 +879,8 @@ Replica::timer() {
 
 void
 Replica::heartbeatSender() {
+    std::stringstream msg;
+
     while(true) {
         this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
                                        LockName::LOG_LOCK,
@@ -905,7 +906,7 @@ Replica::heartbeatSender() {
         unsigned int old = this->commitIndex;
         this->commitIndex = this->findUpdatedCommitIndex();
         if(old != this->commitIndex) {
-            std::stringstream msg;
+            msg.str("");
             msg << "Commit index changed from " << old << " to " << this->commitIndex;
             this->logMsg(msg.str());
         }
@@ -917,7 +918,7 @@ Replica::heartbeatSender() {
                 }
             };
 
-            std::stringstream msg;
+            msg.str("");
             msg << "Now applying log entry " << this->log[this->lastApplied+1] << " to state machine";
             this->logMsg(msg.str());
 
@@ -965,45 +966,40 @@ Replica::heartbeatSender() {
                         break;
                     }
 
-                    std::stringstream msg;
+                    msg.str("");
 
                     if(appendEntryResponse.success == false) {
-                        msg.str("");
                         msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
                         this->logMsg(msg.str());
                         int possibleNewNextIndex = this->nextIndex[id]-1;
                         this->nextIndex[id] = std::max(0, possibleNewNextIndex);
                     }
                     else if(!Replica::isAnEmptyEntry(entryToSend)) {
-                        msg.str("");
                         msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
                         this->logMsg(msg.str());
                         this->matchIndex[id] = this->nextIndex[id];
                         ++this->nextIndex[id];
                     }
                     else {
-                        msg.str("");
                         msg << "AppendEntryRequest (heartbeat) directed to " << id << " successful";
                         this->logMsg(msg.str());
                     }
                 }
 
                 catch(TTransportException& e) {
-                    std::stringstream msg;
+                    msg.str("");
                     if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                        msg.str("");
                         msg << "Timeout occurred while sending a heartbeat to the replica at " << id;
                         this->logMsg(msg.str());
                     }
                     else {
-                        msg.str("");
                         msg << "Error while attempting to send an AppendEntryRequest to the replica at " << id;
                         this->logMsg(msg.str());
                     }
                 }
             }
             catch(TTransportException& e) {
-                std::stringstream msg;
+                msg.str("");
                 msg << "Error while attempting to establish a connection to send an appendEntry request to " << id << " from heartbeat sender: " << e.getType();
                 this->logMsg(msg.str());
             }
@@ -1024,6 +1020,8 @@ Replica::heartbeatSender() {
 void
 Replica::retryRequest() {
     unsigned int maxTimeToSpendRetryingMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+
+    std::stringstream msg;
 
     while(true) {
         while(this->jobsToRetry.empty()) {
@@ -1064,7 +1062,7 @@ Replica::retryRequest() {
                 break;
             }
 
-            std::stringstream msg;
+            msg.str("");
             msg << "Retrying AppendEntryRequest " << entry << " after " << timeoutMS << " ms.";
             this->logMsg(msg.str());
 
@@ -1085,7 +1083,7 @@ Replica::retryRequest() {
                 transport->open();
             }
             catch(TTransportException& e) {
-                std::stringstream msg;
+                msg.str("");
                 msg << "Error while attempting to open a connecton to retry an AppendEntryRequest to the replica at " << targetID;
                 this->logMsg(msg.str());
             }
@@ -1118,8 +1116,8 @@ Replica::retryRequest() {
                     break;
                 }
 
+                msg.str("");
                 if(appendEntryResponse.success == false) {
-                    std::stringstream msg;
                     msg << "AppendEntryRequest retry to " << targetID << " failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!";
                     this->logMsg(msg.str());
 
@@ -1132,7 +1130,6 @@ Replica::retryRequest() {
                                                    LockName::LOG_LOCK);
                 }
                 else {
-                    std::stringstream msg;
                     msg << "Entry successfully replicated on " << targetID  << " during retry: Now increasing nextIndex value from " <<
                                 this->nextIndex.at(targetID) << " to " << (this->nextIndex.at(targetID)+1);
                     this->logMsg(msg.str());
@@ -1151,14 +1148,12 @@ Replica::retryRequest() {
                 }
             }
             catch(TTransportException& e) {
-                std::stringstream msg;
+                msg.str("");
                 if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                    msg.str("");
                     msg << "Timeout occurred while retrying an AppendEntryRequest to the replica at " << targetID;
                     this->logMsg(msg.str());
                 }
                 else {
-                    msg.str("");
                     msg << "Non-Timeout error while attempting to retry an AppendEntryRequest to the replica at " << targetID;
                     this->logMsg(msg.str());
                 }
