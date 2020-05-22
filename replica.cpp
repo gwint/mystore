@@ -179,7 +179,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     assert(prevLogIndex >= 0);
     assert(this->log.size() > 0);
 
-    if((term < this->currentTerm) || (prevLogIndex >= this->log.size()) ||
+    if((term < this->currentTerm) || ((unsigned) prevLogIndex >= this->log.size()) ||
                                 (this->log[prevLogIndex].term != prevLogTerm)) {
 
         #ifndef NDEBUG
@@ -207,7 +207,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     this->state = ReplicaState::FOLLOWER;
 
     unsigned int numEntriesToRemove = 0;
-    for(unsigned int i = this->log.size()-1; i > prevLogIndex; --i) {
+    for(int i = this->log.size()-1; i > prevLogIndex; --i) {
         ++numEntriesToRemove;
     }
 
@@ -662,7 +662,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 this->logMsg(msg.str());
                 #endif
 
-                Job retryJob = {this->log.size()-1, id.hostname, id.port};
+                Job retryJob = {(int) this->log.size()-1, id.hostname, id.port};
                 this->jobsToRetry.push(retryJob);
                 continue;
             }
@@ -996,7 +996,7 @@ Replica::heartbeatSender() {
             continue;
         }
 
-        unsigned int old = this->commitIndex;
+        int old = this->commitIndex;
         this->commitIndex = this->findUpdatedCommitIndex();
         if(old != this->commitIndex) {
             #ifndef NDEBUG
@@ -1036,7 +1036,7 @@ Replica::heartbeatSender() {
             Entry entryToSend = Replica::getEmptyLogEntry();
             unsigned int prevLogIndex = this->log.size()-1;
             unsigned int prevLogTerm = this->log.back().term;
-            if(this->nextIndex[id] < this->log.size()) {
+            if(this->nextIndex[id] < (int) this->log.size()) {
                 unsigned int logIndexToSend = this->nextIndex[id];
                 entryToSend = this->log[logIndexToSend];
                 prevLogIndex = logIndexToSend-1;
