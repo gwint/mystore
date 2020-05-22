@@ -24,6 +24,12 @@ struct Job {
     int targetPort;
 };
 
+struct Snapshot {
+    int lastIncludedIndex;
+    int lastIncludedTerm;
+    std::vector<std::pair<std::string, std::string>> mappings;
+};
+
 class Replica : virtual public ReplicaServiceIf {
 
     private:
@@ -51,8 +57,6 @@ class Replica : virtual public ReplicaServiceIf {
         std::thread timerThr;
         std::thread heartbeatSenderThr;
         std::thread retryThr;
-        std::thread logCompactionThr;
-        bool hasSnapshotBeenTaken;
 
         static Entry getEmptyLogEntry();
         static bool isAnEmptyEntry(const Entry&);
@@ -60,6 +64,7 @@ class Replica : virtual public ReplicaServiceIf {
         static std::vector<ID> getClusterMembership();
         static ID getNullID();
         static bool isANullID(const ID&);
+        static bool doesSnapshotExist();
 
         bool isAtLeastAsUpToDateAs(unsigned int,
                                    unsigned int,

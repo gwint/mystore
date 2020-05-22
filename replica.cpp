@@ -67,8 +67,7 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       hasOperationStarted(false),
                                       clusterMembership(Replica::getClusterMembership()),
                                       lockHandler(13),
-                                      noopIndex(0),
-                                      hasSnapshotBeenTaken(false) {
+                                      noopIndex(0) {
 
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
@@ -1308,7 +1307,6 @@ Replica::compactLog() {
     compactionFileStream.close();
 
     this->log.clear();
-    this->hasSnapshotBeenTaken = true;
 }
 
 Entry
@@ -1431,6 +1429,14 @@ Replica::getNullID() {
 bool
 Replica::isANullID(const ID& id) {
     return id.hostname == "" && id.port == 0;
+}
+
+bool
+Replica::doesSnapshotExist() {
+    std::string compactionFileName = dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME];
+    std::ofstream compactionFileStream(compactionFileName.c_str(), std::ifstream::out);
+
+    return compactionFileStream.fail();
 }
 
 bool
