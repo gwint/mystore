@@ -74,6 +74,7 @@ class Replica : virtual public ReplicaServiceIf {
         static const char* HEARTBEAT_TICK_ENV_VAR_NAME;
         static const char* RPC_TIMEOUT_ENV_VAR_NAME;
         static const char* RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME;
+        static const char* SNAPSHOT_FILE_ENV_VAR_NAME;
 
     public:
         Replica(unsigned int);
