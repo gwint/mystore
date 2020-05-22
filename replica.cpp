@@ -8,6 +8,7 @@
 #include <chrono>
 #include <stdlib.h>
 #include <cassert>
+#include <fstream>
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
@@ -66,7 +67,8 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       hasOperationStarted(false),
                                       clusterMembership(Replica::getClusterMembership()),
                                       lockHandler(13),
-                                      noopIndex(0) {
+                                      noopIndex(0),
+                                      hasSnapshotBeenTaken(false) {
 
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
@@ -1287,6 +1289,26 @@ Replica::retryRequest() {
             timeoutMS = ((double) timeoutMS) * 1.5;
         }
     }
+}
+
+void
+Replica::compactLog() {
+    std::string compactionFileName = dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME];
+    std::ofstream compactionFileStream(compactionFileName.c_str(), std::ifstream::out | std::ifstream::binary);
+
+    unsigned int lastIncludedIndex = this->log.size()-1;
+    int lastIncludedTerm = this->log.back().term;
+
+    compactionFileStream << lastIncludedIndex << lastIncludedTerm;
+
+    for(auto const& mapping : this->stateMachine) {
+        compactionFileStream << mapping.first << '\0' << mapping.second << '\0';
+    }
+
+    compactionFileStream.close();
+
+    this->log.clear();
+    this->hasSnapshotBeenTaken = true;
 }
 
 Entry

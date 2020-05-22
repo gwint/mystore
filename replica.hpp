@@ -51,6 +51,8 @@ class Replica : virtual public ReplicaServiceIf {
         std::thread timerThr;
         std::thread heartbeatSenderThr;
         std::thread retryThr;
+        std::thread logCompactionThr;
+        bool hasSnapshotBeenTaken;
 
         static Entry getEmptyLogEntry();
         static bool isAnEmptyEntry(const Entry&);
@@ -91,6 +93,7 @@ class Replica : virtual public ReplicaServiceIf {
         void timer();
         void heartbeatSender();
         void retryRequest();
+        void compactLog();
 };
 
 std::ostream&
