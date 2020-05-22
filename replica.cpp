@@ -449,7 +449,10 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     matchIndices.push_back(this->log.size()-1);
 
     if(areAMajorityGreaterThanOrEqual(matchIndices, this->noopIndex)) {
-        _return.value = this->stateMachine.at(key);
+        _return.value = "";
+        if(this->stateMachine.find(key) != this->stateMachine.end()) {
+            _return.value = this->stateMachine.at(key);
+        }
     }
 
     this->lockHandler.releaseLocks(LockName::STATE_LOCK,
