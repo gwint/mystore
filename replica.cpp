@@ -183,7 +183,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     assert(this->log.size() > 0);
 
     if((term < this->currentTerm) || ((unsigned) prevLogIndex >= this->log.size()) ||
-                                (this->log[prevLogIndex].term != prevLogTerm)) {
+                                (this->log.at(prevLogIndex).term != prevLogTerm)) {
 
         #ifndef NDEBUG
         msg.str("");
@@ -250,12 +250,12 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     if(this->commitIndex > this->lastApplied) {
         #ifndef NDEBUG
         msg.str("");
-        msg << "Now applying log entry " << this->log[this->lastApplied+1] << " to state machine";
+        msg << "Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine";
         this->logMsg(msg.str());
         #endif
 
         ++this->lastApplied;
-        applyEntry(this->log[this->lastApplied]);
+        applyEntry(this->log.at(this->lastApplied));
     }
 
     this->leader = leaderID;
@@ -523,7 +523,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
         unsigned int relevantEntryIndex = 0;
         for(unsigned int entryIndex = 0; entryIndex < this->log.size(); ++entryIndex) {
-            if(this->log[entryIndex].requestIdentifier == requestIdentifier) {
+            if(this->log.at(entryIndex).requestIdentifier == requestIdentifier) {
                 relevantEntryIndex = entryIndex;
                 break;
             }
@@ -531,7 +531,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
         assert(relevantEntryIndex != 0);
 
-        bool entryIsFromCurrentTerm = (this->log[relevantEntryIndex].term == this->currentTerm);
+        bool entryIsFromCurrentTerm = (this->log.at(relevantEntryIndex).term == this->currentTerm);
 
         std::vector<int> matchIndices;
         for(auto pair : this->matchIndex) {
@@ -611,7 +611,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                this->currentTerm,
                                this->myID,
                                this->log.size()-2,
-                               this->log[this->log.size()-2].term,
+                               this->log.at(this->log.size()-2).term,
                                newLogEntry,
                                this->commitIndex);
 
@@ -637,12 +637,12 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
             if(appendEntryResponse.success == false) {
                 #ifndef NDEBUG
                 msg.str("");
-                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex[id];
+                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id);
                 this->logMsg(msg.str());
                 #endif
 
-                assert(this->nextIndex[id] > 0);
-                this->nextIndex[id] = std::max(1, this->nextIndex[id]-1);
+                assert(this->nextIndex.at(id) > 0);
+                this->nextIndex.at(id) = std::max(1, this->nextIndex.at(id)-1);
             }
             else {
                 #ifndef NDEBUG
@@ -652,8 +652,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 this->logMsg(msg.str());
                 #endif
 
-                this->matchIndex[id] = this->nextIndex[id];
-                ++this->nextIndex[id];
+                this->matchIndex[id] = this->nextIndex.at(id);
+                ++this->nextIndex.at(id);
                 ++numServersReplicatedOn;
             }
         }
@@ -905,22 +905,22 @@ Replica::timer() {
                                 if(appendEntryResponse.success == false) {
                                     #ifndef NDEBUG
                                     msg.str("");
-                                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
+                                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
                                     this->logMsg(msg.str());
                                     #endif
 
-                                    int possibleNewNextIndex = this->nextIndex[id]-1;
+                                    int possibleNewNextIndex = this->nextIndex.at(id)-1;
                                     this->nextIndex[id] = std::max(1, possibleNewNextIndex);
                                 }
                                 else {
                                     #ifndef NDEBUG
                                     msg.str("");
-                                    msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
+                                    msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
                                     this->logMsg(msg.str());
                                     #endif
 
-                                    this->matchIndex[id] = this->nextIndex[id];
-                                    ++this->nextIndex[id];
+                                    this->matchIndex[id] = this->nextIndex.at(id);
+                                    ++this->nextIndex.at(id);
                                 }
                             }
                             catch(TTransportException& e) {
@@ -1018,12 +1018,12 @@ Replica::heartbeatSender() {
 
             #ifndef NDEBUG
             msg.str("");
-            msg << "Now applying log entry " << this->log[this->lastApplied+1] << " to state machine";
+            msg << "Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine";
             this->logMsg(msg.str());
             #endif
 
             ++this->lastApplied;
-            applyEntry(this->log[this->lastApplied]);
+            applyEntry(this->log.at(this->lastApplied));
         }
 
         for(const ID& id : this->clusterMembership) {
@@ -1039,11 +1039,11 @@ Replica::heartbeatSender() {
             Entry entryToSend = Replica::getEmptyLogEntry();
             unsigned int prevLogIndex = this->log.size()-1;
             unsigned int prevLogTerm = this->log.back().term;
-            if(this->nextIndex[id] < (int) this->log.size()) {
-                unsigned int logIndexToSend = this->nextIndex[id];
-                entryToSend = this->log[logIndexToSend];
+            if(this->nextIndex.at(id) < (int) this->log.size()) {
+                unsigned int logIndexToSend = this->nextIndex.at(id);
+                entryToSend = this->log.at(logIndexToSend);
                 prevLogIndex = logIndexToSend-1;
-                prevLogTerm = this->log[prevLogIndex].term;
+                prevLogTerm = this->log.at(prevLogIndex).term;
             }
 
             try {
@@ -1070,22 +1070,22 @@ Replica::heartbeatSender() {
                     if(appendEntryResponse.success == false) {
                         #ifndef NDEBUG
                         msg.str("");
-                        msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
+                        msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
                         this->logMsg(msg.str());
                         #endif
 
-                        int possibleNewNextIndex = this->nextIndex[id]-1;
+                        int possibleNewNextIndex = this->nextIndex.at(id)-1;
                         this->nextIndex[id] = std::max(0, possibleNewNextIndex);
                     }
                     else if(!Replica::isAnEmptyEntry(entryToSend)) {
                         #ifndef NDEBUG
                         msg.str("");
-                        msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
+                        msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
                         this->logMsg(msg.str());
                         #endif
 
-                        this->matchIndex[id] = this->nextIndex[id];
-                        ++this->nextIndex[id];
+                        this->matchIndex[id] = this->nextIndex.at(id);
+                        ++this->nextIndex.at(id);
                     }
                     else {
                         #ifndef NDEBUG
@@ -1407,7 +1407,7 @@ Replica::findUpdatedCommitIndex() {
 
     while(possibleNewCommitIndex > this->commitIndex) {
         if(areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex) &&
-                      this->log[possibleNewCommitIndex].term == this->currentTerm) {
+                      this->log.at(possibleNewCommitIndex).term == this->currentTerm) {
             return possibleNewCommitIndex;
         }
 
