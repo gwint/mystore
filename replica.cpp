@@ -102,6 +102,11 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     spdlog::flush_on(spdlog::level::info);
     spdlog::set_default_logger(this->logger);
 
+    if(Replica::doesSnapshotExist()) {
+        std::ifstream snapshotFileObj(dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME].c_str());
+        snapshotFileObj >> this->currentSnapshot;
+    }
+
     this->timerThr = std::thread(&Replica::timer, this);
     this->heartbeatSenderThr = std::thread(&Replica::heartbeatSender, this);
     this->retryThr = std::thread(&Replica::retryRequest, this);
@@ -1290,25 +1295,6 @@ Replica::retryRequest() {
     }
 }
 
-void
-Replica::compactLog() {
-    std::string compactionFileName = dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME];
-    std::ofstream compactionFileStream(compactionFileName.c_str(), std::ifstream::out | std::ifstream::binary);
-
-    unsigned int lastIncludedIndex = this->log.size()-1;
-    int lastIncludedTerm = this->log.back().term;
-
-    compactionFileStream << lastIncludedIndex << lastIncludedTerm;
-
-    for(auto const& mapping : this->stateMachine) {
-        compactionFileStream << mapping.first << '\0' << mapping.second << '\0';
-    }
-
-    compactionFileStream.close();
-
-    this->log.clear();
-}
-
 Entry
 Replica::getEmptyLogEntry() {
     Entry emptyLogEntry;
@@ -1437,6 +1423,12 @@ Replica::doesSnapshotExist() {
     std::ofstream compactionFileStream(compactionFileName.c_str(), std::ifstream::out);
 
     return compactionFileStream.fail();
+}
+
+void
+Replica::compactLog() {
+    // Populate local Snapshot object
+    // Clear log
 }
 
 bool

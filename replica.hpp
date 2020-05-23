@@ -57,6 +57,7 @@ class Replica : virtual public ReplicaServiceIf {
         std::thread timerThr;
         std::thread heartbeatSenderThr;
         std::thread retryThr;
+        Snapshot currentSnapshot;
 
         static Entry getEmptyLogEntry();
         static bool isAnEmptyEntry(const Entry&);
@@ -74,6 +75,8 @@ class Replica : virtual public ReplicaServiceIf {
         unsigned int findUpdatedCommitIndex();
 
         void logMsg(std::string);
+
+        void compactLog();
 
         static const char* MIN_ELECTION_TIMEOUT_ENV_VAR_NAME;
         static const char* MAX_ELECTION_TIMEOUT_ENV_VAR_NAME;
@@ -98,7 +101,6 @@ class Replica : virtual public ReplicaServiceIf {
         void timer();
         void heartbeatSender();
         void retryRequest();
-        void compactLog();
 };
 
 std::ostream&
@@ -142,6 +144,37 @@ operator<<(std::ostream& os, const ReplicaState& state) {
     };
 
     return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const Snapshot& snapshot) {
+    os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
+
+    for(auto const& mapping : snapshot.mappings) {
+        os << mapping.first << '\n' << mapping.second << '\n';
+    }
+
+    return os;
+}
+
+std::istream&
+operator>>(std::istream& is, Snapshot& snapshot) {
+    int lastIncludedIndex,
+        lastIncludedTerm;
+
+    is >> lastIncludedIndex >> lastIncludedTerm;
+
+    snapshot.lastIncludedIndex = lastIncludedIndex;
+    snapshot.lastIncludedTerm = lastIncludedTerm;
+
+    while(is) {
+        std::string key, value;
+        is >> key >> value;
+
+        snapshot.mappings.push_back({key, value});
+    }
+
+    return is;
 }
 
 #endif
