@@ -30,7 +30,7 @@
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
 
-#define NDEBUG
+//#define NDEBUG
 
 using apache::thrift::transport::TTransportException;
 
@@ -239,6 +239,10 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         #endif
 
         this->log.push_back(entry);
+
+        if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+            this->currentSnapshot = this->getSnapshot();
+        }
     }
 
     if(leaderCommit > this->commitIndex) {
@@ -578,6 +582,10 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     newLogEntry.clientIdentifier = clientIdentifier;
     newLogEntry.requestIdentifier = requestIdentifier;
     this->log.push_back(newLogEntry);
+
+    if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+        this->currentSnapshot = this->getSnapshot();
+    }
 
     this->currentRequestBeingServiced = requestIdentifier;
 
@@ -1425,10 +1433,25 @@ Replica::doesSnapshotExist() {
     return compactionFileStream.fail();
 }
 
-void
-Replica::compactLog() {
-    // Populate local Snapshot object
-    // Clear log
+Snapshot
+Replica::getSnapshot() {
+    Snapshot newSnapshot;
+
+    newSnapshot.lastIncludedIndex =
+             Replica::doesSnapshotExist() ? this->log.size()-1 + this->currentSnapshot.lastIncludedIndex : this->log.size()-1;
+    newSnapshot.lastIncludedTerm = this->log.back().term;
+    for(auto const& mapping : this->stateMachine) {
+        newSnapshot.mappings.push_back(mapping);
+    }
+
+    #ifndef NDEBUG
+    std::stringstream msg;
+    msg << "Taking snapshot: index=" << newSnapshot.lastIncludedIndex << ", term=" <<
+                newSnapshot.lastIncludedTerm << ", " << newSnapshot.mappings;
+    this->logMsg(msg.str());
+    #endif
+
+    return newSnapshot;
 }
 
 bool

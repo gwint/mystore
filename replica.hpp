@@ -76,7 +76,7 @@ class Replica : virtual public ReplicaServiceIf {
 
         void logMsg(std::string);
 
-        void compactLog();
+        Snapshot getSnapshot();
 
         static const char* MIN_ELECTION_TIMEOUT_ENV_VAR_NAME;
         static const char* MAX_ELECTION_TIMEOUT_ENV_VAR_NAME;
@@ -106,8 +106,13 @@ class Replica : virtual public ReplicaServiceIf {
 std::ostream&
 operator<<(std::ostream& os, const std::unordered_map<std::string, std::string>& stateMachine) {
     os << "[";
-    for(auto const& mapping : stateMachine) {
-        os << mapping.first << "=>" << mapping.second << ", ";
+    unsigned int count = 0;
+    for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
+        os << it->first << "=>" << it->second;
+        if(count < stateMachine.size()-1) {
+            os << ", ";
+        }
+        ++count;
     }
     os << "]";
 
@@ -120,7 +125,7 @@ operator<<(std::ostream& os, const std::vector<Entry>& log) {
     for(unsigned int i = 0; i < log.size(); ++i) {
         os << log[i];
 
-        if(i < log.size()) {
+        if(i < log.size()-1) {
             os << ", ";
         }
     }
@@ -175,6 +180,20 @@ operator>>(std::istream& is, Snapshot& snapshot) {
     }
 
     return is;
+}
+
+std::ostream&
+operator<<(std::ostream& os, std::vector<std::pair<std::string, std::string>>& mappings) {
+    os << "[";
+    for(unsigned int i = 0; i < mappings.size(); ++i) {
+        os << mappings[i].first << "=>" << mappings[i].second;
+        if(i < mappings.size()-1) {
+            os << ", ";
+        }
+    }
+    os << "]";
+
+    return os;
 }
 
 #endif

@@ -121,11 +121,17 @@ def displayClusterInfoInTable(clusterInfo):
     print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
 
 def displayClusterInfoWithCommaSep(clusterInfo):
+    count = 0
     for endpoint, replicaInformation in clusterInfo.items():
         if replicaInformation:
-            print(f'{endpoint[0]},{endpoint[1]},{replicaInformation["role"]},{replicaInformation["term"]},{replicaInformation["index"]};', end='')
+            print(f'{endpoint[0]},{endpoint[1]},{replicaInformation["role"]},{replicaInformation["term"]},{replicaInformation["index"]}', end='')
         else:
-            print(f'{endpoint[0]},{endpoint[1]},None;', end='')
+            print(f'{endpoint[0]},{endpoint[1]},None', end='')
+
+        if count < len(clusterInfo)-1:
+            print(';', end='')
+
+        count += 1
 
     print()
 
