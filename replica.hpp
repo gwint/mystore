@@ -97,6 +97,7 @@ class Replica : virtual public ReplicaServiceIf {
         void kill();
         void start();
         void getInformation(std::map<std::string, std::string> &);
+        int32_t installSnapshot(const int32_t, const ID&, const int32_t, const int32_t, const int32_t, const std::string&, const bool);
 
         void timer();
         void heartbeatSender();

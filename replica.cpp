@@ -1303,6 +1303,57 @@ Replica::retryRequest() {
     }
 }
 
+int32_t
+Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int32_t lastIncludedIndex, const int32_t lastIncludedTerm, const int32_t offset, const std::string& data, const bool done) {
+    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
+                                   LockName::TIMER_LOCK);
+
+    int termToReturn = std::max(this->currentTerm, leaderTerm);
+
+    if(this->currentTerm > leaderTerm) {
+        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                       LockName::TIMER_LOCK);
+        return termToReturn;
+    }
+
+    this->currentTerm = termToReturn;
+
+    this->timeLeft = this->timeout;
+
+    std::string compactionFileName = dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME];
+
+    std::ofstream compactionFileStream;
+    if(offset == 0) {
+        compactionFileStream.open(compactionFileName.c_str(), std::ofstream::binary);
+    }
+    else {
+        compactionFileStream.open(compactionFileName.c_str(), std::ofstream::binary | std::ofstream::app);
+    }
+
+    compactionFileStream.seekp(offset, std::ios_base::beg);
+
+    const char* bytes = data.c_str();
+    for(unsigned int i = 0; i < data.size(); ++i) {
+        compactionFileStream << bytes[i];
+    }
+    compactionFileStream.close();
+
+    if(!done) {
+        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                       LockName::TIMER_LOCK);
+        return termToReturn;
+    }
+
+    std::ifstream compactionFileStream(compactionFileName.c_str());
+    compactionFileStream >> this->currentSnapshot;
+    compactionFileStream.close();
+
+    this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                   LockName::TIMER_LOCK);
+
+    return termToReturn;
+}
+
 Entry
 Replica::getEmptyLogEntry() {
     Entry emptyLogEntry;
