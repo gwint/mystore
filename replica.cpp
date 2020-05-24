@@ -102,10 +102,8 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     spdlog::flush_on(spdlog::level::info);
     spdlog::set_default_logger(this->logger);
 
-    if(Replica::doesSnapshotExist()) {
-        std::ifstream snapshotFileObj(dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME].c_str());
-        snapshotFileObj >> this->currentSnapshot;
-    }
+    this->currentSnapshot.lastIncludedIndex = 0;
+    this->currentSnapshot.lastIncludedTerm = 0;
 
     this->timerThr = std::thread(&Replica::timer, this);
     this->heartbeatSenderThr = std::thread(&Replica::heartbeatSender, this);
@@ -1306,13 +1304,15 @@ Replica::retryRequest() {
 int32_t
 Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int32_t lastIncludedIndex, const int32_t lastIncludedTerm, const int32_t offset, const std::string& data, const bool done) {
     this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::TIMER_LOCK);
+                                   LockName::TIMER_LOCK,
+                                   LockName::LOG_LOCK);
 
     int termToReturn = std::max(this->currentTerm, leaderTerm);
 
     if(this->currentTerm > leaderTerm) {
         this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                       LockName::TIMER_LOCK);
+                                       LockName::TIMER_LOCK,
+                                       LockName::LOG_LOCK);
         return termToReturn;
     }
 
@@ -1320,7 +1320,9 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
 
     this->timeLeft = this->timeout;
 
-    std::string compactionFileName = dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME];
+    std::stringstream compactionFileNameStream;
+    compactionFileNameStream << dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME] << "-" << this->myID.hostname << ":" << this->myID.port;
+    std::string compactionFileName = compactionFileNameStream.str();
 
     std::ofstream compactionFileStream;
     if(offset == 0) {
@@ -1340,16 +1342,25 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
 
     if(!done) {
         this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                       LockName::TIMER_LOCK);
+                                       LockName::TIMER_LOCK,
+                                       LockName::LOG_LOCK);
         return termToReturn;
     }
 
+
+    for(unsigned int i = 0; i < this->log.size(); ++i) {
+        
+    }
+
+/*
     std::ifstream compactionFileStream(compactionFileName.c_str());
     compactionFileStream >> this->currentSnapshot;
     compactionFileStream.close();
+*/
 
     this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::TIMER_LOCK);
+                                   LockName::TIMER_LOCK,
+                                   LockName::LOG_LOCK);
 
     return termToReturn;
 }
@@ -1476,20 +1487,11 @@ Replica::isANullID(const ID& id) {
     return id.hostname == "" && id.port == 0;
 }
 
-bool
-Replica::doesSnapshotExist() {
-    std::string compactionFileName = dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME];
-    std::ofstream compactionFileStream(compactionFileName.c_str(), std::ifstream::out);
-
-    return compactionFileStream.fail();
-}
-
 Snapshot
 Replica::getSnapshot() {
     Snapshot newSnapshot;
 
-    newSnapshot.lastIncludedIndex =
-             Replica::doesSnapshotExist() ? this->log.size()-1 + this->currentSnapshot.lastIncludedIndex : this->log.size()-1;
+    newSnapshot.lastIncludedIndex = this->log.size()-1 + this->currentSnapshot.lastIncludedIndex;
     newSnapshot.lastIncludedTerm = this->log.back().term;
     for(auto const& mapping : this->stateMachine) {
         newSnapshot.mappings.push_back(mapping);

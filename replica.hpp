@@ -65,7 +65,6 @@ class Replica : virtual public ReplicaServiceIf {
         static std::vector<ID> getClusterMembership();
         static ID getNullID();
         static bool isANullID(const ID&);
-        static bool doesSnapshotExist();
 
         bool isAtLeastAsUpToDateAs(unsigned int,
                                    unsigned int,
