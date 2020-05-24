@@ -189,7 +189,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     assert(this->log.size() > 0);
 
     if((term < this->currentTerm) || ((unsigned) prevLogIndex >= this->log.size()) ||
-                                (this->log.at(prevLogIndex).term != prevLogTerm)) {
+                                                    (prevLogTerm != this->log.at(prevLogIndex).term)) {
 
         #ifndef NDEBUG
         msg.str("");
@@ -242,9 +242,11 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
         this->log.push_back(entry);
 
+        #ifndef NDEBUG
         if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
             this->currentSnapshot = this->getSnapshot();
         }
+        #endif
     }
 
     if(leaderCommit > this->commitIndex) {
@@ -595,9 +597,11 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     newLogEntry.requestIdentifier = requestIdentifier;
     this->log.push_back(newLogEntry);
 
+    #ifndef NDEBUG
     if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
         this->currentSnapshot = this->getSnapshot();
     }
+    #endif
 
     this->currentRequestBeingServiced = requestIdentifier;
 
