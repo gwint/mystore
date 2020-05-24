@@ -11,7 +11,7 @@ within the system.  See the below resources for more information about RAFT:
 
 - C++ >= 14
 - cmake >= 3.17.2
-- Python >= 3.7
+- Python >= 3.7 (used for command line tool)
 - Apache Thrift version >= 0.13.0
 - A Github Account (to pull in external projects used for logging and .env file reading during build)
 
