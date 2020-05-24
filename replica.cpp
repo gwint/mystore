@@ -170,7 +170,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::LEADER_LOCK,
                                    LockName::MAP_LOCK,
                                    LockName::TIMER_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK);
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -205,7 +206,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                        LockName::LEADER_LOCK,
                                        LockName::MAP_LOCK,
                                        LockName::TIMER_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK);
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -276,7 +278,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::LEADER_LOCK,
                                    LockName::MAP_LOCK,
                                    LockName::TIMER_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK);
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 }
 
 void
@@ -486,7 +489,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK);
+                                   LockName::MATCH_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     _return.success = true;
 
@@ -516,7 +520,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -568,7 +573,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -640,7 +646,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                                LockName::VOTED_FOR_LOCK,
                                                LockName::NEXT_INDEX_LOCK,
                                                LockName::LAST_APPLIED_LOCK,
-                                               LockName::MATCH_INDEX_LOCK);
+                                               LockName::MATCH_INDEX_LOCK,
+                                               LockName::SNAPSHOT_LOCK);
 
                 return;
             }
@@ -718,7 +725,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK);
+                                   LockName::MATCH_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     return;
 }
@@ -1305,14 +1313,16 @@ int32_t
 Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int32_t lastIncludedIndex, const int32_t lastIncludedTerm, const int32_t offset, const std::string& data, const bool done) {
     this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
                                    LockName::TIMER_LOCK,
-                                   LockName::LOG_LOCK);
+                                   LockName::LOG_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     int termToReturn = std::max(this->currentTerm, leaderTerm);
 
     if(this->currentTerm > leaderTerm) {
         this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
                                        LockName::TIMER_LOCK,
-                                       LockName::LOG_LOCK);
+                                       LockName::LOG_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
         return termToReturn;
     }
 
@@ -1343,24 +1353,25 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     if(!done) {
         this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
                                        LockName::TIMER_LOCK,
-                                       LockName::LOG_LOCK);
+                                       LockName::LOG_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
         return termToReturn;
     }
 
 
     for(unsigned int i = 0; i < this->log.size(); ++i) {
-        
     }
 
-/*
+    /*
     std::ifstream compactionFileStream(compactionFileName.c_str());
     compactionFileStream >> this->currentSnapshot;
     compactionFileStream.close();
-*/
+    */
 
     this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
                                    LockName::TIMER_LOCK,
-                                   LockName::LOG_LOCK);
+                                   LockName::LOG_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     return termToReturn;
 }

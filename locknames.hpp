@@ -14,7 +14,8 @@ enum LockName {
     LEADER_LOCK,
     MAP_LOCK,
     CURRENT_REQUEST_ID_LOCK,
-    LATEST_NO_OP_LOG_INDEX
+    LATEST_NO_OP_LOG_INDEX,
+    SNAPSHOT_LOCK
 };
 
 #endif
