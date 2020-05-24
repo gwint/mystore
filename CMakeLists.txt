@@ -28,9 +28,9 @@ execute_process(
 )
 
 set(ThriftGeneratedFiles
-    /home/gregory/distributed-key-value-store/gen-cpp/ReplicaService.cpp
-    /home/gregory/distributed-key-value-store/gen-cpp/replicaservice_types.cpp
-    /home/gregory/distributed-key-value-store/gen-cpp/replicaservice_constants.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
 )
 
 set(ServerFiles replica.cpp lockhandler.cpp replica.hpp lockhandler.hpp)
