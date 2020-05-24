@@ -103,7 +103,7 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     spdlog::set_default_logger(this->logger);
 
     this->currentSnapshot.lastIncludedIndex = 0;
-    this->currentSnapshot.lastIncludedTerm = 0;
+    this->currentSnapshot.lastIncludedTerm = -1;
 
     this->timerThr = std::thread(&Replica::timer, this);
     this->heartbeatSenderThr = std::thread(&Replica::heartbeatSender, this);
