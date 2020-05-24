@@ -24,6 +24,12 @@ struct Job {
     int targetPort;
 };
 
+struct Snapshot {
+    int lastIncludedIndex;
+    int lastIncludedTerm;
+    std::vector<std::pair<std::string, std::string>> mappings;
+};
+
 class Replica : virtual public ReplicaServiceIf {
 
     private:
@@ -51,6 +57,7 @@ class Replica : virtual public ReplicaServiceIf {
         std::thread timerThr;
         std::thread heartbeatSenderThr;
         std::thread retryThr;
+        Snapshot currentSnapshot;
 
         static Entry getEmptyLogEntry();
         static bool isAnEmptyEntry(const Entry&);
@@ -68,12 +75,16 @@ class Replica : virtual public ReplicaServiceIf {
 
         void logMsg(std::string);
 
+        Snapshot getSnapshot();
+
         static const char* MIN_ELECTION_TIMEOUT_ENV_VAR_NAME;
         static const char* MAX_ELECTION_TIMEOUT_ENV_VAR_NAME;
         static const char* CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME;
         static const char* HEARTBEAT_TICK_ENV_VAR_NAME;
         static const char* RPC_TIMEOUT_ENV_VAR_NAME;
         static const char* RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME;
+        static const char* SNAPSHOT_FILE_ENV_VAR_NAME;
+        static const char* MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME;
 
     public:
         Replica(unsigned int);
@@ -85,6 +96,7 @@ class Replica : virtual public ReplicaServiceIf {
         void kill();
         void start();
         void getInformation(std::map<std::string, std::string> &);
+        int32_t installSnapshot(const int32_t, const ID&, const int32_t, const int32_t, const int32_t, const std::string&, const bool);
 
         void timer();
         void heartbeatSender();
@@ -94,8 +106,13 @@ class Replica : virtual public ReplicaServiceIf {
 std::ostream&
 operator<<(std::ostream& os, const std::unordered_map<std::string, std::string>& stateMachine) {
     os << "[";
-    for(auto const& mapping : stateMachine) {
-        os << mapping.first << "=>" << mapping.second << ", ";
+    unsigned int count = 0;
+    for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
+        os << it->first << "=>" << it->second;
+        if(count < stateMachine.size()-1) {
+            os << ", ";
+        }
+        ++count;
     }
     os << "]";
 
@@ -108,7 +125,7 @@ operator<<(std::ostream& os, const std::vector<Entry>& log) {
     for(unsigned int i = 0; i < log.size(); ++i) {
         os << log[i];
 
-        if(i < log.size()) {
+        if(i < log.size()-1) {
             os << ", ";
         }
     }
@@ -130,6 +147,51 @@ operator<<(std::ostream& os, const ReplicaState& state) {
             os << "FOLLOWER";
             break;
     };
+
+    return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const Snapshot& snapshot) {
+    os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
+
+    for(auto const& mapping : snapshot.mappings) {
+        os << mapping.first << '\n' << mapping.second << '\n';
+    }
+
+    return os;
+}
+
+std::istream&
+operator>>(std::istream& is, Snapshot& snapshot) {
+    int lastIncludedIndex,
+        lastIncludedTerm;
+
+    is >> lastIncludedIndex >> lastIncludedTerm;
+
+    snapshot.lastIncludedIndex = lastIncludedIndex;
+    snapshot.lastIncludedTerm = lastIncludedTerm;
+
+    while(is) {
+        std::string key, value;
+        is >> key >> value;
+
+        snapshot.mappings.push_back({key, value});
+    }
+
+    return is;
+}
+
+std::ostream&
+operator<<(std::ostream& os, std::vector<std::pair<std::string, std::string>>& mappings) {
+    os << "[";
+    for(unsigned int i = 0; i < mappings.size(); ++i) {
+        os << mappings[i].first << "=>" << mappings[i].second;
+        if(i < mappings.size()-1) {
+            os << ", ";
+        }
+    }
+    os << "]";
 
     return os;
 }

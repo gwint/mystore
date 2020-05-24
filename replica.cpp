@@ -8,6 +8,7 @@
 #include <chrono>
 #include <stdlib.h>
 #include <cassert>
+#include <fstream>
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
@@ -29,7 +30,7 @@
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
 
-#define NDEBUG
+//#define NDEBUG
 
 using apache::thrift::transport::TTransportException;
 
@@ -52,6 +53,8 @@ const char* Replica::CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_
 const char* Replica::HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS";
 const char* Replica::RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS";
 const char* Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT";
+const char* Replica::SNAPSHOT_FILE_ENV_VAR_NAME = "SNAPSHOT_FILE";
+const char* Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME = "MAX_ALLOWED_LOG_SIZE";
 
 Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       currentTerm(0),
@@ -63,7 +66,7 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                       hasOperationStarted(false),
                                       clusterMembership(Replica::getClusterMembership()),
-                                      lockHandler(13),
+                                      lockHandler(14),
                                       noopIndex(0) {
 
     this->timeLeft = this->timeout;
@@ -99,6 +102,9 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     spdlog::flush_on(spdlog::level::info);
     spdlog::set_default_logger(this->logger);
 
+    this->currentSnapshot.lastIncludedIndex = 0;
+    this->currentSnapshot.lastIncludedTerm = -1;
+
     this->timerThr = std::thread(&Replica::timer, this);
     this->heartbeatSenderThr = std::thread(&Replica::heartbeatSender, this);
     this->retryThr = std::thread(&Replica::retryRequest, this);
@@ -112,7 +118,8 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
     this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
                                    LockName::LOG_LOCK,
                                    LockName::STATE_LOCK,
-                                   LockName::VOTED_FOR_LOCK);
+                                   LockName::VOTED_FOR_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -146,7 +153,8 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
     this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
                                    LockName::LOG_LOCK,
                                    LockName::STATE_LOCK,
-                                   LockName::VOTED_FOR_LOCK);
+                                   LockName::VOTED_FOR_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     _return.voteGranted = voteGranted;
     _return.term = ballotTerm;
@@ -164,7 +172,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::LEADER_LOCK,
                                    LockName::MAP_LOCK,
                                    LockName::TIMER_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK);
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -180,7 +189,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     assert(this->log.size() > 0);
 
     if((term < this->currentTerm) || ((unsigned) prevLogIndex >= this->log.size()) ||
-                                (this->log[prevLogIndex].term != prevLogTerm)) {
+                                                    (prevLogTerm != this->log.at(prevLogIndex).term)) {
 
         #ifndef NDEBUG
         msg.str("");
@@ -199,7 +208,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                        LockName::LEADER_LOCK,
                                        LockName::MAP_LOCK,
                                        LockName::TIMER_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK);
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -231,6 +241,12 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         #endif
 
         this->log.push_back(entry);
+
+        #ifndef NDEBUG
+        if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+            this->currentSnapshot = this->getSnapshot();
+        }
+        #endif
     }
 
     if(leaderCommit > this->commitIndex) {
@@ -247,12 +263,12 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     if(this->commitIndex > this->lastApplied) {
         #ifndef NDEBUG
         msg.str("");
-        msg << "Now applying log entry " << this->log[this->lastApplied+1] << " to state machine";
+        msg << "Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine";
         this->logMsg(msg.str());
         #endif
 
         ++this->lastApplied;
-        applyEntry(this->log[this->lastApplied]);
+        applyEntry(this->log.at(this->lastApplied));
     }
 
     this->leader = leaderID;
@@ -266,7 +282,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::LEADER_LOCK,
                                    LockName::MAP_LOCK,
                                    LockName::TIMER_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK);
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 }
 
 void
@@ -280,7 +297,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    LockName::COMMIT_INDEX_LOCK,
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
-                                   LockName::LATEST_NO_OP_LOG_INDEX);
+                                   LockName::LATEST_NO_OP_LOG_INDEX,
+                                   LockName::SNAPSHOT_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -308,7 +326,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                        LockName::COMMIT_INDEX_LOCK,
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::LATEST_NO_OP_LOG_INDEX);
+                                       LockName::LATEST_NO_OP_LOG_INDEX,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -369,7 +388,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                                    LockName::COMMIT_INDEX_LOCK,
                                                    LockName::VOTED_FOR_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LATEST_NO_OP_LOG_INDEX);
+                                                   LockName::LATEST_NO_OP_LOG_INDEX,
+                                                   LockName::SNAPSHOT_LOCK);
 
                     return;
                 }
@@ -390,7 +410,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                                    LockName::COMMIT_INDEX_LOCK,
                                                    LockName::VOTED_FOR_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LATEST_NO_OP_LOG_INDEX);
+                                                   LockName::LATEST_NO_OP_LOG_INDEX,
+                                                   LockName::SNAPSHOT_LOCK);
 
                     return;
                 }
@@ -437,7 +458,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                        LockName::COMMIT_INDEX_LOCK,
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::LATEST_NO_OP_LOG_INDEX);
+                                       LockName::LATEST_NO_OP_LOG_INDEX,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -462,7 +484,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    LockName::COMMIT_INDEX_LOCK,
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
-                                   LockName::LATEST_NO_OP_LOG_INDEX);
+                                   LockName::LATEST_NO_OP_LOG_INDEX,
+                                   LockName::SNAPSHOT_LOCK);
 
 }
 
@@ -476,7 +499,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK);
+                                   LockName::MATCH_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     _return.success = true;
 
@@ -506,7 +530,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -520,7 +545,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
         unsigned int relevantEntryIndex = 0;
         for(unsigned int entryIndex = 0; entryIndex < this->log.size(); ++entryIndex) {
-            if(this->log[entryIndex].requestIdentifier == requestIdentifier) {
+            if(this->log.at(entryIndex).requestIdentifier == requestIdentifier) {
                 relevantEntryIndex = entryIndex;
                 break;
             }
@@ -528,7 +553,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
         assert(relevantEntryIndex != 0);
 
-        bool entryIsFromCurrentTerm = (this->log[relevantEntryIndex].term == this->currentTerm);
+        bool entryIsFromCurrentTerm = (this->log.at(relevantEntryIndex).term == this->currentTerm);
 
         std::vector<int> matchIndices;
         for(auto pair : this->matchIndex) {
@@ -558,7 +583,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         return;
     }
@@ -570,6 +596,12 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     newLogEntry.clientIdentifier = clientIdentifier;
     newLogEntry.requestIdentifier = requestIdentifier;
     this->log.push_back(newLogEntry);
+
+    #ifndef NDEBUG
+    if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+        this->currentSnapshot = this->getSnapshot();
+    }
+    #endif
 
     this->currentRequestBeingServiced = requestIdentifier;
 
@@ -608,7 +640,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                this->currentTerm,
                                this->myID,
                                this->log.size()-2,
-                               this->log[this->log.size()-2].term,
+                               this->log.at(this->log.size()-2).term,
                                newLogEntry,
                                this->commitIndex);
 
@@ -626,7 +658,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                                LockName::VOTED_FOR_LOCK,
                                                LockName::NEXT_INDEX_LOCK,
                                                LockName::LAST_APPLIED_LOCK,
-                                               LockName::MATCH_INDEX_LOCK);
+                                               LockName::MATCH_INDEX_LOCK,
+                                               LockName::SNAPSHOT_LOCK);
 
                 return;
             }
@@ -634,12 +667,12 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
             if(appendEntryResponse.success == false) {
                 #ifndef NDEBUG
                 msg.str("");
-                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex[id];
+                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id);
                 this->logMsg(msg.str());
                 #endif
 
-                assert(this->nextIndex[id] > 0);
-                this->nextIndex[id] = std::max(1, this->nextIndex[id]-1);
+                assert(this->nextIndex.at(id) > 0);
+                this->nextIndex.at(id) = std::max(1, this->nextIndex.at(id)-1);
             }
             else {
                 #ifndef NDEBUG
@@ -649,8 +682,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 this->logMsg(msg.str());
                 #endif
 
-                this->matchIndex[id] = this->nextIndex[id];
-                ++this->nextIndex[id];
+                this->matchIndex[id] = this->nextIndex.at(id);
+                ++this->nextIndex.at(id);
                 ++numServersReplicatedOn;
             }
         }
@@ -704,7 +737,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK);
+                                   LockName::MATCH_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
 
     return;
 }
@@ -765,7 +799,8 @@ Replica::timer() {
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::LEADER_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         if(this->state == ReplicaState::LEADER) {
             this->lockHandler.releaseLocks(LockName::STATE_LOCK,
@@ -776,7 +811,8 @@ Replica::timer() {
                                            LockName::VOTED_FOR_LOCK,
                                            LockName::LEADER_LOCK,
                                            LockName::NEXT_INDEX_LOCK,
-                                           LockName::MATCH_INDEX_LOCK);
+                                           LockName::MATCH_INDEX_LOCK,
+                                           LockName::SNAPSHOT_LOCK);
 
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             continue;
@@ -902,22 +938,22 @@ Replica::timer() {
                                 if(appendEntryResponse.success == false) {
                                     #ifndef NDEBUG
                                     msg.str("");
-                                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
+                                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
                                     this->logMsg(msg.str());
                                     #endif
 
-                                    int possibleNewNextIndex = this->nextIndex[id]-1;
+                                    int possibleNewNextIndex = this->nextIndex.at(id)-1;
                                     this->nextIndex[id] = std::max(1, possibleNewNextIndex);
                                 }
                                 else {
                                     #ifndef NDEBUG
                                     msg.str("");
-                                    msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
+                                    msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
                                     this->logMsg(msg.str());
                                     #endif
 
-                                    this->matchIndex[id] = this->nextIndex[id];
-                                    ++this->nextIndex[id];
+                                    this->matchIndex[id] = this->nextIndex.at(id);
+                                    ++this->nextIndex.at(id);
                                 }
                             }
                             catch(TTransportException& e) {
@@ -964,7 +1000,8 @@ Replica::timer() {
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::LEADER_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -981,7 +1018,8 @@ Replica::heartbeatSender() {
                                        LockName::COMMIT_INDEX_LOCK,
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         if(this->state != ReplicaState::LEADER) {
             this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
@@ -990,7 +1028,8 @@ Replica::heartbeatSender() {
                                            LockName::COMMIT_INDEX_LOCK,
                                            LockName::VOTED_FOR_LOCK,
                                            LockName::NEXT_INDEX_LOCK,
-                                           LockName::MATCH_INDEX_LOCK);
+                                           LockName::MATCH_INDEX_LOCK,
+                                           LockName::SNAPSHOT_LOCK);
 
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             continue;
@@ -1015,12 +1054,12 @@ Replica::heartbeatSender() {
 
             #ifndef NDEBUG
             msg.str("");
-            msg << "Now applying log entry " << this->log[this->lastApplied+1] << " to state machine";
+            msg << "Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine";
             this->logMsg(msg.str());
             #endif
 
             ++this->lastApplied;
-            applyEntry(this->log[this->lastApplied]);
+            applyEntry(this->log.at(this->lastApplied));
         }
 
         for(const ID& id : this->clusterMembership) {
@@ -1036,11 +1075,11 @@ Replica::heartbeatSender() {
             Entry entryToSend = Replica::getEmptyLogEntry();
             unsigned int prevLogIndex = this->log.size()-1;
             unsigned int prevLogTerm = this->log.back().term;
-            if(this->nextIndex[id] < (int) this->log.size()) {
-                unsigned int logIndexToSend = this->nextIndex[id];
-                entryToSend = this->log[logIndexToSend];
+            if(this->nextIndex.at(id) < (int) this->log.size()) {
+                unsigned int logIndexToSend = this->nextIndex.at(id);
+                entryToSend = this->log.at(logIndexToSend);
                 prevLogIndex = logIndexToSend-1;
-                prevLogTerm = this->log[prevLogIndex].term;
+                prevLogTerm = this->log.at(prevLogIndex).term;
             }
 
             try {
@@ -1067,22 +1106,22 @@ Replica::heartbeatSender() {
                     if(appendEntryResponse.success == false) {
                         #ifndef NDEBUG
                         msg.str("");
-                        msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex[id];
+                        msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
                         this->logMsg(msg.str());
                         #endif
 
-                        int possibleNewNextIndex = this->nextIndex[id]-1;
+                        int possibleNewNextIndex = this->nextIndex.at(id)-1;
                         this->nextIndex[id] = std::max(0, possibleNewNextIndex);
                     }
                     else if(!Replica::isAnEmptyEntry(entryToSend)) {
                         #ifndef NDEBUG
                         msg.str("");
-                        msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex[id];
+                        msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
                         this->logMsg(msg.str());
                         #endif
 
-                        this->matchIndex[id] = this->nextIndex[id];
-                        ++this->nextIndex[id];
+                        this->matchIndex[id] = this->nextIndex.at(id);
+                        ++this->nextIndex.at(id);
                     }
                     else {
                         #ifndef NDEBUG
@@ -1122,7 +1161,8 @@ Replica::heartbeatSender() {
                                        LockName::COMMIT_INDEX_LOCK,
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(this->heartbeatTick));
     }
@@ -1154,7 +1194,8 @@ Replica::retryRequest() {
                                            LockName::VOTED_FOR_LOCK,
                                            LockName::NEXT_INDEX_LOCK,
                                            LockName::MATCH_INDEX_LOCK,
-                                           LockName::LOG_LOCK);
+                                           LockName::LOG_LOCK,
+                                           LockName::SNAPSHOT_LOCK);
 
             Entry entry = this->log.at(job.entryPosition);
 
@@ -1168,7 +1209,8 @@ Replica::retryRequest() {
                                                LockName::VOTED_FOR_LOCK,
                                                LockName::NEXT_INDEX_LOCK,
                                                LockName::MATCH_INDEX_LOCK,
-                                               LockName::LOG_LOCK);
+                                               LockName::LOG_LOCK,
+                                               LockName::SNAPSHOT_LOCK);
 
                 break;
             }
@@ -1226,7 +1268,8 @@ Replica::retryRequest() {
                                                    LockName::VOTED_FOR_LOCK,
                                                    LockName::NEXT_INDEX_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LOG_LOCK);
+                                                   LockName::LOG_LOCK,
+                                                   LockName::SNAPSHOT_LOCK);
 
                     break;
                 }
@@ -1244,7 +1287,8 @@ Replica::retryRequest() {
                                                    LockName::VOTED_FOR_LOCK,
                                                    LockName::NEXT_INDEX_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LOG_LOCK);
+                                                   LockName::LOG_LOCK,
+                                                   LockName::SNAPSHOT_LOCK);
                 }
                 else {
                     #ifndef NDEBUG
@@ -1263,7 +1307,8 @@ Replica::retryRequest() {
                                                    LockName::VOTED_FOR_LOCK,
                                                    LockName::NEXT_INDEX_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LOG_LOCK);
+                                                   LockName::LOG_LOCK,
+                                                   LockName::SNAPSHOT_LOCK);
                     break;
                 }
             }
@@ -1285,6 +1330,73 @@ Replica::retryRequest() {
             timeoutMS = ((double) timeoutMS) * 1.5;
         }
     }
+}
+
+int32_t
+Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int32_t lastIncludedIndex, const int32_t lastIncludedTerm, const int32_t offset, const std::string& data, const bool done) {
+    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
+                                   LockName::TIMER_LOCK,
+                                   LockName::LOG_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
+
+    int termToReturn = std::max(this->currentTerm, leaderTerm);
+
+    if(this->currentTerm > leaderTerm) {
+        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                       LockName::TIMER_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
+        return termToReturn;
+    }
+
+    this->currentTerm = termToReturn;
+
+    this->timeLeft = this->timeout;
+
+    std::stringstream compactionFileNameStream;
+    compactionFileNameStream << dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME] << "-" << this->myID.hostname << ":" << this->myID.port;
+    std::string compactionFileName = compactionFileNameStream.str();
+
+    std::ofstream compactionFileStream;
+    if(offset == 0) {
+        compactionFileStream.open(compactionFileName.c_str(), std::ofstream::binary);
+    }
+    else {
+        compactionFileStream.open(compactionFileName.c_str(), std::ofstream::binary | std::ofstream::app);
+    }
+
+    compactionFileStream.seekp(offset, std::ios_base::beg);
+
+    const char* bytes = data.c_str();
+    for(unsigned int i = 0; i < data.size(); ++i) {
+        compactionFileStream << bytes[i];
+    }
+    compactionFileStream.close();
+
+    if(!done) {
+        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                       LockName::TIMER_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
+        return termToReturn;
+    }
+
+
+    for(unsigned int i = 0; i < this->log.size(); ++i) {
+    }
+
+    /*
+    std::ifstream compactionFileStream(compactionFileName.c_str());
+    compactionFileStream >> this->currentSnapshot;
+    compactionFileStream.close();
+    */
+
+    this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
+                                   LockName::TIMER_LOCK,
+                                   LockName::LOG_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
+
+    return termToReturn;
 }
 
 Entry
@@ -1385,7 +1497,7 @@ Replica::findUpdatedCommitIndex() {
 
     while(possibleNewCommitIndex > this->commitIndex) {
         if(areAMajorityGreaterThanOrEqual(indices, possibleNewCommitIndex) &&
-                      this->log[possibleNewCommitIndex].term == this->currentTerm) {
+                      this->log.at(possibleNewCommitIndex).term == this->currentTerm) {
             return possibleNewCommitIndex;
         }
 
@@ -1407,6 +1519,26 @@ Replica::getNullID() {
 bool
 Replica::isANullID(const ID& id) {
     return id.hostname == "" && id.port == 0;
+}
+
+Snapshot
+Replica::getSnapshot() {
+    Snapshot newSnapshot;
+
+    newSnapshot.lastIncludedIndex = this->log.size()-1 + this->currentSnapshot.lastIncludedIndex;
+    newSnapshot.lastIncludedTerm = this->log.back().term;
+    for(auto const& mapping : this->stateMachine) {
+        newSnapshot.mappings.push_back(mapping);
+    }
+
+    #ifndef NDEBUG
+    std::stringstream msg;
+    msg << "Taking snapshot: index=" << newSnapshot.lastIncludedIndex << ", term=" <<
+                newSnapshot.lastIncludedTerm << ", " << newSnapshot.mappings;
+    this->logMsg(msg.str());
+    #endif
+
+    return newSnapshot;
 }
 
 bool
