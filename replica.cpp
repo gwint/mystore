@@ -66,7 +66,7 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                       hasOperationStarted(false),
                                       clusterMembership(Replica::getClusterMembership()),
-                                      lockHandler(13),
+                                      lockHandler(14),
                                       noopIndex(0) {
 
     this->timeLeft = this->timeout;
