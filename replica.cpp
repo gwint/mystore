@@ -30,7 +30,7 @@
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
 
-//#define NDEBUG
+#define NDEBUG
 
 using apache::thrift::transport::TTransportException;
 
