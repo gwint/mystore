@@ -233,7 +233,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         }
     }
 
-    if(!Replica::isAnEmptyEntry(entry)) {
+    if(entry.type != EntryType::EMPTY_ENTRY) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Now appending " << entry << " to the log";
@@ -255,7 +255,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     }
 
     auto applyEntry = [&](const Entry& entry) {
-        if(!Replica::isAnEmptyEntry(entry)) {
+        if(entry.type != EntryType::EMPTY_ENTRY) {
             this->stateMachine[entry.key] = entry.value;
         }
     };
@@ -590,6 +590,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     }
 
     Entry newLogEntry;
+    newLogEntry.type = EntryType::SET_MAPPING_ENTRY;
     newLogEntry.key = key;
     newLogEntry.value = value;
     newLogEntry.term = this->currentTerm;
@@ -895,6 +896,7 @@ Replica::timer() {
                     this->leader = this->myID;
                     this->noopIndex = this->log.size();
                     Entry noopEntry;
+                    noopEntry.type = EntryType::NOOP_ENTRY;
                     noopEntry.key = "";
                     noopEntry.value = "";
                     noopEntry.term = this->currentTerm;
@@ -1047,7 +1049,7 @@ Replica::heartbeatSender() {
 
         if(this->commitIndex > this->lastApplied) {
             auto applyEntry = [&](const Entry& entry) {
-                if(!Replica::isAnEmptyEntry(entry)) {
+                if(entry.type != EntryType::EMPTY_ENTRY) {
                     this->stateMachine[entry.key] = entry.value;
                 }
             };
@@ -1073,6 +1075,7 @@ Replica::heartbeatSender() {
             ReplicaServiceClient client(protocol);
 
             Entry entryToSend = Replica::getEmptyLogEntry();
+            entryToSend.type = EntryType::EMPTY_ENTRY;
             unsigned int prevLogIndex = this->log.size()-1;
             unsigned int prevLogTerm = this->log.back().term;
             if(this->nextIndex.at(id) < (int) this->log.size()) {
@@ -1113,7 +1116,7 @@ Replica::heartbeatSender() {
                         int possibleNewNextIndex = this->nextIndex.at(id)-1;
                         this->nextIndex[id] = std::max(0, possibleNewNextIndex);
                     }
-                    else if(!Replica::isAnEmptyEntry(entryToSend)) {
+                    else if(entryToSend.type != EntryType::EMPTY_ENTRY) {
                         #ifndef NDEBUG
                         msg.str("");
                         msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
@@ -1402,6 +1405,7 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
 Entry
 Replica::getEmptyLogEntry() {
     Entry emptyLogEntry;
+    emptyLogEntry.type = EntryType::EMPTY_ENTRY;
     emptyLogEntry.key = "";
     emptyLogEntry.value = "";
     emptyLogEntry.term = -1;
@@ -1409,15 +1413,6 @@ Replica::getEmptyLogEntry() {
     emptyLogEntry.requestIdentifier = std::numeric_limits<int>::max();
 
     return emptyLogEntry;
-}
-
-bool
-Replica::isAnEmptyEntry(const Entry& entry) {
-    return entry.key == "" &&
-           entry.value == "" &&
-           entry.term == -1 &&
-           entry.clientIdentifier == "" &&
-           entry.requestIdentifier == std::numeric_limits<int>::max();
 }
 
 unsigned int

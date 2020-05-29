@@ -14,13 +14,20 @@
  *
  */
 
+enum EntryType {
+    EMPTY_ENTRY = 1,
+    SET_MAPPING_ENTRY = 2,
+    CONFIG_CHANGE_ENTRY = 3,
+    NOOP_ENTRY = 4
+}
 
 struct Entry {
-    1: string key,
-    2: string value,
-    3: i32 term,
-    4: string clientIdentifier,
-    5: i32 requestIdentifier
+    1: EntryType type,
+    2: string key,
+    3: string value,
+    4: i32 term,
+    5: string clientIdentifier,
+    6: i32 requestIdentifier
 }
 
 struct AppendEntryResponse {
