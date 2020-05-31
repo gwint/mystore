@@ -93,5 +93,7 @@ service ReplicaService {
                         4:i32 lastIncludedTerm,
                         5:i32 offset,
                         6:binary data,
-                        7:bool done)
+                        7:bool done),
+
+    void addNewConfiguration(1:list<string> endpoints)
 }
