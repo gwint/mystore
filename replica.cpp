@@ -1402,15 +1402,53 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     return termToReturn;
 }
 
-void
+bool
 Replica::addNewConfiguration(const std::vector<std::string>& endpoints) {
-    this->lockHandler.acquireLocks(LockName::LOG_LOCK);
+    this->lockHandler.acquireLocks(LockName::LOG_LOCK,
+                                   LockName::CURR_TERM_LOCK,
+                                   LockName::STATE_LOCK);
+
+    if(this->state != ReplicaState::LEADER) {
+        return false;
+    }
 
     Entry newConfigurationEntry;
     newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
     newConfigurationEntry.endpoints = endpoints;
+    newConfigurationEntry.term = this->currentTerm;
 
-    this->lockHandler.releaseLocks(LockName::LOG_LOCK);
+    this->log.push_back(newConfigurationEntry);
+
+    std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(this->myID.hostname, this->myID.port));
+    socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+    socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+    socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+
+    std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+    std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+    ReplicaServiceClient client(protocol);
+
+    try {
+        transport->open();
+
+        AppendEntryResponse appendEntryResponse;
+        client.appendEntry(appendEntryResponse,
+                           this->currentTerm,
+                           this->myID,
+                           this->log.size()-2,
+                           this->log.at(this->log.size()-2).term,
+                           newConfigurationEntry,
+                           this->commitIndex);
+    }
+    catch(TTransportException& e) {
+        return false;
+    }
+
+    this->lockHandler.releaseLocks(LockName::LOG_LOCK,
+                                   LockName::CURR_TERM_LOCK,
+                                   LockName::STATE_LOCK);
+
+    return true;
 }
 
 Entry

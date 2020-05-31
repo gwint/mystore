@@ -96,5 +96,5 @@ service ReplicaService {
                         6:binary data,
                         7:bool done),
 
-    void addNewConfiguration(1:list<string> endpoints)
+    bool addNewConfiguration(1:list<string> endpoints)
 }
