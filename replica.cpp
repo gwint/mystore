@@ -1404,11 +1404,13 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
 
 void
 Replica::addNewConfiguration(const std::vector<std::string>& endpoints) {
-    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK);
+    this->lockHandler.acquireLocks(LockName::LOG_LOCK);
 
-    this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK);
+    Entry newConfigurationEntry;
+    newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
+    newConfigurationEntry.endpoints = endpoints;
+
+    this->lockHandler.releaseLocks(LockName::LOG_LOCK);
 }
 
 Entry

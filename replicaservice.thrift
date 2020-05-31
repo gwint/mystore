@@ -27,7 +27,8 @@ struct Entry {
     3: string value,
     4: i32 term,
     5: string clientIdentifier,
-    6: i32 requestIdentifier
+    6: i32 requestIdentifier,
+    7: list<string> endpoints
 }
 
 struct AppendEntryResponse {
