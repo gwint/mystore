@@ -256,8 +256,20 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     }
 
     auto applyEntry = [&](const Entry& entry) {
-        if(entry.type != EntryType::EMPTY_ENTRY) {
-            this->stateMachine[entry.key] = entry.value;
+        if(entry.type == EntryType::SET_MAPPING_ENTRY) {
+            if(this->stateMachine.find(entry.key) == this->stateMachine.end()) {
+                std::stack<std::string> values;
+                values.push(entry.value);
+                this->stateMachine[entry.key] = values;
+            }
+            else {
+                this->stateMachine[entry.key].push(entry.value);
+            }
+        }
+        else if(entry.type == EntryType::DEL_MAPPING_ENTRY) {
+            if(this->stateMachine.find(entry.key) != this->stateMachine.end()) {
+                this->stateMachine.erase(entry.key);
+            }
         }
     };
 
@@ -474,7 +486,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     if(areAMajorityGreaterThanOrEqual(matchIndices, this->noopIndex)) {
         _return.value = "";
         if(this->stateMachine.find(key) != this->stateMachine.end()) {
-            _return.value = this->stateMachine.at(key);
+            _return.value = this->stateMachine.at(key).top();
         }
     }
 
@@ -982,7 +994,15 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         this->logMsg(msg.str());
         #endif
 
-        this->stateMachine[key] = value;
+        if(this->stateMachine.find(key) == this->stateMachine.end()) {
+            std::stack<std::string> valueStack;
+            valueStack.push(value);
+            this->stateMachine[key] = valueStack;
+        }
+        else {
+            this->stateMachine[key].push(value);
+        }
+
         this->commitIndex = this->log.size()-1;
         this->lastApplied = this->log.size()-1;
     }
@@ -1306,8 +1326,20 @@ Replica::heartbeatSender() {
 
         if(this->commitIndex > this->lastApplied) {
             auto applyEntry = [&](const Entry& entry) {
-                if(entry.type != EntryType::EMPTY_ENTRY) {
-                    this->stateMachine[entry.key] = entry.value;
+                if(entry.type == EntryType::SET_MAPPING_ENTRY) {
+                    if(this->stateMachine.find(entry.key) == this->stateMachine.end()) {
+                        std::stack<std::string> values;
+                        values.push(entry.value);
+                        this->stateMachine[entry.key] = values;
+                    }
+                    else {
+                        this->stateMachine[entry.key].push(entry.value);
+                    }
+                }
+                else if(entry.type == EntryType::DEL_MAPPING_ENTRY) {
+                    if(this->stateMachine.find(entry.key) != this->stateMachine.end()) {
+                        this->stateMachine.erase(entry.key);
+                    }
                 }
             };
 

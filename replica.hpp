@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <utility>
 #include <queue>
+#include <stack>
 #include <thread>
 
 #include "states.hpp"
@@ -27,7 +28,7 @@ struct Job {
 struct Snapshot {
     int lastIncludedIndex;
     int lastIncludedTerm;
-    std::vector<std::pair<std::string, std::string>> mappings;
+    std::vector<std::pair<std::string, std::stack<std::string>>> mappings;
 };
 
 class Replica : virtual public ReplicaServiceIf {
@@ -46,7 +47,7 @@ class Replica : virtual public ReplicaServiceIf {
         ID myID;
         ID votedFor;
         ID leader;
-        std::unordered_map<std::string, std::string> stateMachine;
+        std::unordered_map<std::string, std::stack<std::string>> stateMachine;
         int currentRequestBeingServiced;
         std::queue<Job> jobsToRetry;
         bool hasOperationStarted;
@@ -105,11 +106,11 @@ class Replica : virtual public ReplicaServiceIf {
 };
 
 std::ostream&
-operator<<(std::ostream& os, const std::unordered_map<std::string, std::string>& stateMachine) {
+operator<<(std::ostream& os, const std::unordered_map<std::string, std::stack<std::string>>& stateMachine) {
     os << "[";
     unsigned int count = 0;
     for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
-        os << it->first << "=>" << it->second;
+        os << it->first << "=>" << it->second.top();
         if(count < stateMachine.size()-1) {
             os << ", ";
         }
@@ -157,7 +158,7 @@ operator<<(std::ostream& os, const Snapshot& snapshot) {
     os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
 
     for(auto const& mapping : snapshot.mappings) {
-        os << mapping.first << '\n' << mapping.second << '\n';
+        os << mapping.first << '\n' << mapping.second.top() << '\n';
     }
 
     return os;
@@ -173,12 +174,17 @@ operator>>(std::istream& is, Snapshot& snapshot) {
     snapshot.lastIncludedIndex = lastIncludedIndex;
     snapshot.lastIncludedTerm = lastIncludedTerm;
 
+    /*
     while(is) {
         std::string key, value;
         is >> key >> value;
 
+        std::stack<std::string>> valueStack;
+        valueStack.push(value);
+
         snapshot.mappings.push_back({key, value});
     }
+    */
 
     return is;
 }

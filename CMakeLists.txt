@@ -23,7 +23,11 @@ ExternalProject_Add(spdlog
 
 set(ServerFiles replica.cpp lockhandler.cpp replica.hpp lockhandler.hpp)
 
-add_custom_target(ThriftFileGeneration
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp
+           ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
+           ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
+           ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
     COMMAND thrift -r --gen cpp ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -39,8 +43,8 @@ add_library(ThriftFileCompilation
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
 )
 
+##add_dependencies(ThriftFileCompilation ThriftFileGeneration)
 add_dependencies(MyStore ThriftFileCompilation)
-add_dependencies(ThriftFileCompilation ThriftFileGeneration)
 add_dependencies(MyStore spdlog)
 add_dependencies(MyStore cpp-dotenv)
 
