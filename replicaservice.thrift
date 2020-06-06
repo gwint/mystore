@@ -56,7 +56,7 @@ struct PutResponse {
 
 struct GetResponse {
     1: bool success,
-    2: string value,
+    2: list<string> values,
     3: ID leaderID
 }
 

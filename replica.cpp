@@ -484,9 +484,14 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     matchIndices.push_back(this->log.size()-1);
 
     if(areAMajorityGreaterThanOrEqual(matchIndices, this->noopIndex)) {
-        _return.value = "";
+        _return.values.push_back("");
         if(this->stateMachine.find(key) != this->stateMachine.end()) {
-            _return.value = this->stateMachine.at(key).top();
+            _return.values.clear();
+            std::stack<std::string> valuesCopy(this->stateMachine.at(key));
+            while(valuesCopy.empty()) {
+                _return.values.push_back(valuesCopy.top());
+                valuesCopy.pop();
+            }
         }
     }
 
