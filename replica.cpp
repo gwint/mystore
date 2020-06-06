@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <cassert>
 #include <fstream>
+#include <unordered_set>
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
@@ -487,6 +488,262 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    LockName::LATEST_NO_OP_LOG_INDEX,
                                    LockName::SNAPSHOT_LOCK);
 
+}
+
+void
+Replica::deletekey(DelResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier) {
+    this->lockHandler.acquireLocks(LockName::STATE_LOCK,
+                                   LockName::LEADER_LOCK,
+                                   LockName::CURR_TERM_LOCK,
+                                   LockName::LOG_LOCK,
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::VOTED_FOR_LOCK,
+                                   LockName::NEXT_INDEX_LOCK,
+                                   LockName::LAST_APPLIED_LOCK,
+                                   LockName::MATCH_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
+
+    _return.success = true;
+
+    #ifndef NDEBUG
+    std::stringstream msg;
+    msg << this->myID << " now attempting to delete " << key;
+    this->logMsg(msg.str());
+    #endif
+
+    if(this->state != ReplicaState::LEADER) {
+        #ifndef NDEBUG
+        msg.str("");
+        msg << "Was contacted to resolve a DEL but am not the leader, redirected to " << this-> leader;
+        this->logMsg(msg.str());
+        #endif
+
+        _return.success = false;
+        if(!Replica::isANullID(this->leader)) {
+            _return.leaderID = this->leader;
+        }
+
+        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                       LockName::LEADER_LOCK,
+                                       LockName::CURR_TERM_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::VOTED_FOR_LOCK,
+                                       LockName::NEXT_INDEX_LOCK,
+                                       LockName::LAST_APPLIED_LOCK,
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
+
+        return;
+    }
+
+    if(requestIdentifier == this->currentRequestBeingServiced) {
+        #ifndef NDEBUG
+        msg.str("");
+        msg << "Continuing servicing of request " << requestIdentifier;
+        this->logMsg(msg.str());
+        #endif
+
+        unsigned int relevantEntryIndex = 0;
+        for(unsigned int entryIndex = 0; entryIndex < this->log.size(); ++entryIndex) {
+            if(this->log.at(entryIndex).requestIdentifier == requestIdentifier) {
+                relevantEntryIndex = entryIndex;
+                break;
+            }
+        }
+
+        assert(relevantEntryIndex != 0);
+
+        bool entryIsFromCurrentTerm = (this->log.at(relevantEntryIndex).term == this->currentTerm);
+
+        std::vector<int> matchIndices;
+        for(auto pair : this->matchIndex) {
+            matchIndices.push_back(pair.second);
+        }
+        matchIndices.push_back(this->log.size()-1);
+
+        _return.success = entryIsFromCurrentTerm &&
+                                        areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
+
+        #ifndef NDEBUG
+        msg.str("");
+        msg << "Is this entry from this term? = " << entryIsFromCurrentTerm;
+        this->logMsg(msg.str());
+
+        msg.str("");
+        msg << "Has the entry been successfully replicated on a majority of replicas " <<
+                                 areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
+        this->logMsg(msg.str());
+        #endif
+
+        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                       LockName::LEADER_LOCK,
+                                       LockName::CURR_TERM_LOCK,
+                                       LockName::LOG_LOCK,
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::VOTED_FOR_LOCK,
+                                       LockName::NEXT_INDEX_LOCK,
+                                       LockName::LAST_APPLIED_LOCK,
+                                       LockName::MATCH_INDEX_LOCK,
+                                       LockName::SNAPSHOT_LOCK);
+
+        return;
+    }
+
+    Entry newLogEntry;
+    newLogEntry.type = EntryType::DEL_MAPPING_ENTRY;
+    newLogEntry.key = key;
+    newLogEntry.term = this->currentTerm;
+    newLogEntry.clientIdentifier = clientIdentifier;
+    newLogEntry.requestIdentifier = requestIdentifier;
+    this->log.push_back(newLogEntry);
+
+    #ifndef NDEBUG
+    if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+        this->currentSnapshot = this->getSnapshot();
+    }
+    #endif
+
+    this->currentRequestBeingServiced = requestIdentifier;
+
+    unsigned int numServersReplicatedOn = 1;
+
+    for(const auto &id : this->clusterMembership) {
+        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+        ReplicaServiceClient client(protocol);
+
+        try {
+            transport->open();
+        }
+        catch(TTransportException& e) {
+            #ifndef NDEBUG
+            msg.str("");
+            msg << "Error while opening a connection to append an entry to replica at " << id << ":" << e.getType();
+            this->logMsg(msg.str());
+            #endif
+            continue;
+        }
+
+        try {
+            #ifndef NDEBUG
+            msg.str("");
+            msg << "Now sending an AppendEntry request to " << id << "; may take a while...";
+            this->logMsg(msg.str());
+            #endif
+
+            AppendEntryResponse appendEntryResponse;
+            client.appendEntry(appendEntryResponse,
+                               this->currentTerm,
+                               this->myID,
+                               this->log.size()-2,
+                               this->log.at(this->log.size()-2).term,
+                               newLogEntry,
+                               this->commitIndex);
+
+            if(appendEntryResponse.term > this->currentTerm) {
+                this->currentTerm = appendEntryResponse.term;
+                this->state = ReplicaState::FOLLOWER;
+                this->votedFor = Replica::getNullID();
+                _return.success = false;
+
+                this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                               LockName::LEADER_LOCK,
+                                               LockName::CURR_TERM_LOCK,
+                                               LockName::LOG_LOCK,
+                                               LockName::COMMIT_INDEX_LOCK,
+                                               LockName::VOTED_FOR_LOCK,
+                                               LockName::NEXT_INDEX_LOCK,
+                                               LockName::LAST_APPLIED_LOCK,
+                                               LockName::MATCH_INDEX_LOCK,
+                                               LockName::SNAPSHOT_LOCK);
+
+                return;
+            }
+
+            if(appendEntryResponse.success == false) {
+                #ifndef NDEBUG
+                msg.str("");
+                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id);
+                this->logMsg(msg.str());
+                #endif
+
+                assert(this->nextIndex.at(id) > 0);
+                this->nextIndex.at(id) = std::max(1, this->nextIndex.at(id)-1);
+            }
+            else {
+                #ifndef NDEBUG
+                msg.str("");
+                msg << "Entry successfully replicated on " << id << ": Now increasing replication aount from " <<
+                        numServersReplicatedOn << " to " << (numServersReplicatedOn+1);
+                this->logMsg(msg.str());
+                #endif
+
+                this->matchIndex[id] = this->nextIndex.at(id);
+                ++this->nextIndex.at(id);
+                ++numServersReplicatedOn;
+            }
+        }
+        catch(TTransportException& e) {
+            if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                #ifndef NDEBUG
+                msg.str("");
+                msg << "Timeout occurred while attempting to append entry to replica at " << id;
+                this->logMsg(msg.str());
+                #endif
+
+                Job retryJob = {(int) this->log.size()-1, id.hostname, id.port};
+                this->jobsToRetry.push(retryJob);
+                continue;
+            }
+
+            throw e;
+        }
+    }
+
+    _return.leaderID = this->leader;
+
+    if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
+        #ifndef NDEBUG
+        msg.str("");
+        msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
+             numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1);
+        this->logMsg(msg.str());
+        #endif
+
+        _return.success = false;
+    }
+    else {
+        #ifndef NDEBUG
+        msg.str("");
+        msg << "Entry successfully replicated on a majority of servers and removing mapping with key: " << key;
+        this->logMsg(msg.str());
+        #endif
+
+        if(this->stateMachine.find(key) != this->stateMachine.end()) {
+            this->stateMachine.erase(key);
+        }
+
+        this->commitIndex = this->log.size()-1;
+        this->lastApplied = this->log.size()-1;
+    }
+
+    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                   LockName::LEADER_LOCK,
+                                   LockName::CURR_TERM_LOCK,
+                                   LockName::LOG_LOCK,
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::VOTED_FOR_LOCK,
+                                   LockName::NEXT_INDEX_LOCK,
+                                   LockName::LAST_APPLIED_LOCK,
+                                   LockName::MATCH_INDEX_LOCK,
+                                   LockName::SNAPSHOT_LOCK);
+
+    return;
 }
 
 void
@@ -1403,10 +1660,11 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
 }
 
 bool
-Replica::addNewConfiguration(const std::vector<std::string>& endpoints) {
+Replica::addNewConfiguration(const std::vector<ID>& newConfiguration) {
     this->lockHandler.acquireLocks(LockName::LOG_LOCK,
                                    LockName::CURR_TERM_LOCK,
-                                   LockName::STATE_LOCK);
+                                   LockName::STATE_LOCK,
+                                   LockName::COMMIT_INDEX_LOCK);
 
     if(this->state != ReplicaState::LEADER) {
         return false;
@@ -1414,39 +1672,86 @@ Replica::addNewConfiguration(const std::vector<std::string>& endpoints) {
 
     Entry newConfigurationEntry;
     newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
-    newConfigurationEntry.endpoints = endpoints;
+    newConfigurationEntry.newConfiguration = newConfiguration;
     newConfigurationEntry.term = this->currentTerm;
 
     this->log.push_back(newConfigurationEntry);
 
-    std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(this->myID.hostname, this->myID.port));
-    socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-    socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-    socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+    std::set<ID> oldConfigurationIDs(this->clusterMembership.begin(), this->clusterMembership.end());
+    std::set<ID> newConfigurationIDs(newConfiguration.begin(), newConfiguration.end());
+    std::set<ID> oldAndNewConfigurationIDs;
 
-    std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-    std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-    ReplicaServiceClient client(protocol);
+    oldAndNewConfigurationIDs.insert(oldConfigurationIDs.begin(), oldConfigurationIDs.end());
+    oldAndNewConfigurationIDs.insert(newConfigurationIDs.begin(), newConfigurationIDs.end());
 
-    try {
-        transport->open();
+    int oldConfigurationReplicationCount = 0,
+        newConfigurationReplicationCount = 0;
 
-        AppendEntryResponse appendEntryResponse;
-        client.appendEntry(appendEntryResponse,
-                           this->currentTerm,
-                           this->myID,
-                           this->log.size()-2,
-                           this->log.at(this->log.size()-2).term,
-                           newConfigurationEntry,
-                           this->commitIndex);
+    for(const ID& id : oldAndNewConfigurationIDs) {
+        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+
+        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+        ReplicaServiceClient client(protocol);
+
+        try {
+            transport->open();
+
+            try {
+                AppendEntryResponse appendEntryResponse;
+                client.appendEntry(appendEntryResponse,
+                                   this->currentTerm,
+                                   this->myID,
+                                   this->log.size()-2,
+                                   this->log.at(this->log.size()-2).term,
+                                   newConfigurationEntry,
+                                   this->commitIndex);
+
+                if(appendEntryResponse.term > this->currentTerm) {
+                    this->state = ReplicaState::FOLLOWER;
+                    this->currentTerm = appendEntryResponse.term;
+                    this->votedFor = Replica::getNullID();
+                    break;
+                }
+
+                if(!appendEntryResponse.success) {
+                    this->currentTerm = appendEntryResponse.term;
+                    this->state = ReplicaState::FOLLOWER;
+                    this->votedFor = Replica::getNullID();
+                }
+                else {
+                    if(oldConfigurationIDs.find(id) != oldConfigurationIDs.end() &&
+                       newConfigurationIDs.find(id) != newConfigurationIDs.end()) {
+                        ++oldConfigurationReplicationCount;
+                        ++newConfigurationReplicationCount;
+                    }
+                    else if(oldConfigurationIDs.find(id) != oldConfigurationIDs.end()) {
+                        ++oldConfigurationReplicationCount;
+                    }
+                    else {
+                        ++newConfigurationReplicationCount;
+                    }
+                }
+            }
+            catch(TTransportException& e) {
+            }
+        }
+        catch(TTransportException& e) {
+        }
     }
-    catch(TTransportException& e) {
-        return false;
+
+    if(oldConfigurationReplicationCount >= ((this->clusterMembership.size() + 1) / 2) + 1 &&
+       newConfigurationReplicationCount >= ((newConfiguration.size() + 1) / 2) + 1) {
+        // try to replicate c_new entry
     }
 
     this->lockHandler.releaseLocks(LockName::LOG_LOCK,
                                    LockName::CURR_TERM_LOCK,
-                                   LockName::STATE_LOCK);
+                                   LockName::STATE_LOCK,
+                                   LockName::COMMIT_INDEX_LOCK);
 
     return true;
 }
