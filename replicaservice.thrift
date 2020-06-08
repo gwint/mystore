@@ -81,7 +81,8 @@ service ReplicaService {
 
     GetResponse get(1:string key,
                     2:string clientIdentifier,
-                    3:i32 requestIdentifier),
+                    3:i32 requestIdentifier,
+                    4:i32 numPastMappings),
 
     PutResponse put(1:string key,
                     2:string value,
@@ -89,8 +90,8 @@ service ReplicaService {
                     4:i32 requestIdentifier),
 
     DelResponse deletekey(1:string key,
-                    2:string clientIdentifier,
-                    3:i32 requestIdentifier),
+                          2:string clientIdentifier,
+                          3:i32 requestIdentifier),
 
     oneway void kill(),
 

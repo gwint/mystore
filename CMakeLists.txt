@@ -29,6 +29,7 @@ add_custom_command(
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
     COMMAND thrift -r --gen cpp ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
+    COMMAND thrift -r --gen py ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )

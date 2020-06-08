@@ -168,14 +168,14 @@ def getHelper(key, clientIdentifier, requestNumber):
 
                     logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
 
-                    response = client.get(str(key), clientIdentifier, currentRequestNumber)
+                    response = client.get(str(key), clientIdentifier, currentRequestNumber, 0)
 
                     if response.success:
-                        logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
+                        #logger.debug(f'GET request successfully resolved: {response.values[0]} is the value retreived')
                         open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
                         setNextRequestIdentifier(currentRequestNumber + 1)
 
-                        return response.value
+                        return response.values[0]
 
                     elif isNullID(response.leaderID):
                         logger.debug(f'GET request unsuccessful and current leader is unknown')

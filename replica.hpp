@@ -28,7 +28,7 @@ struct Job {
 struct Snapshot {
     int lastIncludedIndex;
     int lastIncludedTerm;
-    std::vector<std::pair<std::string, std::stack<std::string>>> mappings;
+    std::vector<std::pair<std::string, std::vector<std::string>>> mappings;
 };
 
 class Replica : virtual public ReplicaServiceIf {
@@ -47,7 +47,7 @@ class Replica : virtual public ReplicaServiceIf {
         ID myID;
         ID votedFor;
         ID leader;
-        std::unordered_map<std::string, std::stack<std::string>> stateMachine;
+        std::unordered_map<std::string, std::vector<std::string>> stateMachine;
         int currentRequestBeingServiced;
         std::queue<Job> jobsToRetry;
         bool hasOperationStarted;
@@ -91,7 +91,7 @@ class Replica : virtual public ReplicaServiceIf {
 
         void requestVote(Ballot&, const int32_t, const ID&, const int32_t, const int32_t);
         void appendEntry(AppendEntryResponse&, const int32_t, const ID&, const int32_t, const int32_t, const Entry&, const int32_t);
-        void get(GetResponse&, const std::string&, const std::string&, const int32_t);
+        void get(GetResponse&, const std::string&, const std::string&, const int32_t, const int32_t);
         void put(PutResponse&, const std::string&, const std::string&, const std::string&, const int32_t);
         void kill();
         void start();
@@ -106,11 +106,11 @@ class Replica : virtual public ReplicaServiceIf {
 };
 
 std::ostream&
-operator<<(std::ostream& os, const std::unordered_map<std::string, std::stack<std::string>>& stateMachine) {
+operator<<(std::ostream& os, const std::unordered_map<std::string, std::vector<std::string>>& stateMachine) {
     os << "[";
     unsigned int count = 0;
     for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
-        os << it->first << "=>" << it->second.top();
+        os << it->first << "=>" << it->second.back();
         if(count < stateMachine.size()-1) {
             os << ", ";
         }
@@ -158,7 +158,7 @@ operator<<(std::ostream& os, const Snapshot& snapshot) {
     os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
 
     for(auto const& mapping : snapshot.mappings) {
-        os << mapping.first << '\n' << mapping.second.top() << '\n';
+        os << mapping.first << '\n' << mapping.second.back() << '\n';
     }
 
     return os;

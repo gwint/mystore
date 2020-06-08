@@ -258,12 +258,11 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     auto applyEntry = [&](const Entry& entry) {
         if(entry.type == EntryType::SET_MAPPING_ENTRY) {
             if(this->stateMachine.find(entry.key) == this->stateMachine.end()) {
-                std::stack<std::string> values;
-                values.push(entry.value);
+                std::vector<std::string> values(1, entry.value);
                 this->stateMachine[entry.key] = values;
             }
             else {
-                this->stateMachine[entry.key].push(entry.value);
+                this->stateMachine[entry.key].push_back(entry.value);
             }
         }
         else if(entry.type == EntryType::DEL_MAPPING_ENTRY) {
@@ -300,7 +299,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 }
 
 void
-Replica::get(GetResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier) {
+Replica::get(GetResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier, const int32_t numPastMappings) {
     _return.success = true;
 
     this->lockHandler.acquireLocks(LockName::STATE_LOCK,
@@ -484,14 +483,15 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     matchIndices.push_back(this->log.size()-1);
 
     if(areAMajorityGreaterThanOrEqual(matchIndices, this->noopIndex)) {
-        _return.values.push_back("");
         if(this->stateMachine.find(key) != this->stateMachine.end()) {
             _return.values.clear();
-            std::stack<std::string> valuesCopy(this->stateMachine.at(key));
-            while(valuesCopy.empty()) {
-                _return.values.push_back(valuesCopy.top());
-                valuesCopy.pop();
-            }
+            _return.values.push_back(this->stateMachine.at(key).back());
+            //for(int i = 0; i < numPastMappings + 1; ++i) {
+            //    _return.values.push_back(this->stateMachine.at(key).at(i));
+            //}
+        }
+        else {
+            _return.values.push_back("");
         }
     }
 
@@ -1000,12 +1000,11 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         #endif
 
         if(this->stateMachine.find(key) == this->stateMachine.end()) {
-            std::stack<std::string> valueStack;
-            valueStack.push(value);
-            this->stateMachine[key] = valueStack;
+            std::vector<std::string> values(1, value);
+            this->stateMachine[key] = values;
         }
-        else {
-            this->stateMachine[key].push(value);
+        else if(this->stateMachine.at(key).back() != value){
+            this->stateMachine[key].push_back(value);
         }
 
         this->commitIndex = this->log.size()-1;
@@ -1333,12 +1332,11 @@ Replica::heartbeatSender() {
             auto applyEntry = [&](const Entry& entry) {
                 if(entry.type == EntryType::SET_MAPPING_ENTRY) {
                     if(this->stateMachine.find(entry.key) == this->stateMachine.end()) {
-                        std::stack<std::string> values;
-                        values.push(entry.value);
+                        std::vector<std::string> values(1, entry.value);
                         this->stateMachine[entry.key] = values;
                     }
                     else {
-                        this->stateMachine[entry.key].push(entry.value);
+                        this->stateMachine[entry.key].push_back(entry.value);
                     }
                 }
                 else if(entry.type == EntryType::DEL_MAPPING_ENTRY) {
