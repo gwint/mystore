@@ -44,7 +44,6 @@ add_library(ThriftFileCompilation
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
 )
 
-##add_dependencies(ThriftFileCompilation ThriftFileGeneration)
 add_dependencies(MyStore ThriftFileCompilation)
 add_dependencies(MyStore spdlog)
 add_dependencies(MyStore cpp-dotenv)
