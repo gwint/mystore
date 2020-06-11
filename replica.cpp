@@ -485,10 +485,13 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     if(areAMajorityGreaterThanOrEqual(matchIndices, this->noopIndex)) {
         if(this->stateMachine.find(key) != this->stateMachine.end()) {
             _return.values.clear();
-            _return.values.push_back(this->stateMachine.at(key).back());
-            //for(int i = 0; i < numPastMappings + 1; ++i) {
-            //    _return.values.push_back(this->stateMachine.at(key).at(i));
-            //}
+            auto pastMappingIter = this->stateMachine.at(key).end() - 1;
+            std::cout << *pastMappingIter << std::endl;
+            _return.values.push_back(*pastMappingIter);
+            while(pastMappingIter != this->stateMachine.at(key).begin()) {
+                --pastMappingIter;
+                _return.values.push_back(*pastMappingIter);
+            }
         }
         else {
             _return.values.push_back("");
