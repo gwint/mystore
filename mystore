@@ -168,7 +168,7 @@ def getHelper(key, clientIdentifier, requestNumber, numPastMappings):
 
                     logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
 
-                    response = client.get(str(key), clientIdentifier, currentRequestNumber, 0)
+                    response = client.get(str(key), clientIdentifier, currentRequestNumber, numPastMappings)
 
                     if response.success:
                         logger.debug(f'GET request successfully resolved: {response.values} is the value retreived')

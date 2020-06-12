@@ -486,10 +486,11 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         if(this->stateMachine.find(key) != this->stateMachine.end()) {
             _return.values.clear();
             auto pastMappingIter = this->stateMachine.at(key).end() - 1;
-            std::cout << *pastMappingIter << std::endl;
             _return.values.push_back(*pastMappingIter);
-            while(pastMappingIter != this->stateMachine.at(key).begin()) {
+            int numPastMappingsProvided = 1;
+            while(pastMappingIter != this->stateMachine.at(key).begin() && numPastMappingsProvided < numPastMappings+1) {
                 --pastMappingIter;
+                ++numPastMappingsProvided;
                 _return.values.push_back(*pastMappingIter);
             }
         }
