@@ -7,7 +7,6 @@
 #include <stack>
 #include <thread>
 
-#include "states.hpp"
 #include "lockhandler.hpp"
 
 #include "gen-cpp/replicaservice_types.h"
@@ -31,8 +30,13 @@ struct Snapshot {
     std::vector<std::pair<std::string, std::vector<std::string>>> mappings;
 };
 
-class Replica : virtual public ReplicaServiceIf {
+enum ReplicaState {
+    LEADER,
+    FOLLOWER,
+    CANDIDATE
+};
 
+class Replica : virtual public ReplicaServiceIf {
     private:
         ReplicaState state;
         int currentTerm;
