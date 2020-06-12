@@ -135,14 +135,14 @@ def displayClusterInfoWithCommaSep(clusterInfo):
 
     print()
 
-def get(key):
+def get(key, numPastMappings):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
-    ret = getHelper(key, hostIP, nextRequestIdentifier)
+    ret = getHelper(key, hostIP, nextRequestIdentifier, numPastMappings)
 
     return ret
 
-def getHelper(key, clientIdentifier, requestNumber):
+def getHelper(key, clientIdentifier, requestNumber, numPastMappings):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -373,6 +373,7 @@ if __name__ == "__main__":
 
     getParser = subparsers.add_parser("get", help="Used to read value associated with a given key")
     getParser.add_argument("key", help="Key whose associated value will be retreived")
+    getParser.add_argument("-rev", nargs="?", type=int, default=0)
 
     args = parser.parse_args()
 
@@ -389,7 +390,8 @@ if __name__ == "__main__":
             print("PUT Request Failed")
     elif args.command == "get":
         try:
-            print(get(args.key))
+            for val in get(args.key, args.rev):
+                print(val)
         except GetFailureException:
             print("GET Request Failed")
     else:
