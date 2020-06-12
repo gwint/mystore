@@ -14,13 +14,22 @@
  *
  */
 
+enum EntryType {
+    EMPTY_ENTRY = 1,
+    SET_MAPPING_ENTRY = 2,
+    DEL_MAPPING_ENTRY = 3,
+    CONFIG_CHANGE_ENTRY = 4,
+    NOOP_ENTRY = 5
+}
 
 struct Entry {
-    1: string key,
-    2: string value,
-    3: i32 term,
-    4: string clientIdentifier,
-    5: i32 requestIdentifier
+    1: EntryType type,
+    2: string key,
+    3: string value,
+    4: i32 term,
+    5: string clientIdentifier,
+    6: i32 requestIdentifier,
+    7: list<ID> newConfiguration
 }
 
 struct AppendEntryResponse {
@@ -41,14 +50,19 @@ struct ID {
 }
 
 struct PutResponse {
-    1: i32 success,
+    1: bool success,
     2: ID leaderID
 }
 
 struct GetResponse {
     1: bool success,
-    2: string value,
+    2: list<string> values,
     3: ID leaderID
+}
+
+struct DelResponse {
+    1: bool success,
+    2: ID leaderID
 }
 
 service ReplicaService {
@@ -67,12 +81,17 @@ service ReplicaService {
 
     GetResponse get(1:string key,
                     2:string clientIdentifier,
-                    3:i32 requestIdentifier),
+                    3:i32 requestIdentifier,
+                    4:i32 numPastMappings),
 
     PutResponse put(1:string key,
                     2:string value,
                     3:string clientIdentifier,
                     4:i32 requestIdentifier),
+
+    DelResponse deletekey(1:string key,
+                          2:string clientIdentifier,
+                          3:i32 requestIdentifier),
 
     oneway void kill(),
 
@@ -86,5 +105,7 @@ service ReplicaService {
                         4:i32 lastIncludedTerm,
                         5:i32 offset,
                         6:binary data,
-                        7:bool done)
+                        7:bool done),
+
+    bool addNewConfiguration(1:list<ID> endpoints)
 }

@@ -21,27 +21,37 @@ ExternalProject_Add(spdlog
     INSTALL_COMMAND ""
 )
 
-execute_process(
-    COMMAND thrift -r --gen cpp replicaservice.thrift
-    COMMAND thrift -r --gen py replicaservice.thrift
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+set(ServerFiles replica.cpp lockhandler.cpp replica.hpp lockhandler.hpp)
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp
+           ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
+           ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
+           ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
+    COMMAND thrift -r --gen cpp ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
+    COMMAND thrift -r --gen py ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-set(ThriftGeneratedFiles
+add_executable(MyStore
+    ${ServerFiles}
+)
+
+add_library(ThriftFileCompilation
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
 )
 
-set(ServerFiles replica.cpp lockhandler.cpp replica.hpp lockhandler.hpp)
-
-add_executable(MyStore ${ThriftGeneratedFiles} ${ServerFiles})
-
+add_dependencies(MyStore ThriftFileCompilation)
 add_dependencies(MyStore spdlog)
 add_dependencies(MyStore cpp-dotenv)
 
+target_include_directories(MyStore PRIVATE gen-cpp/)
 target_include_directories(MyStore PRIVATE spdlog/src/spdlog/include/)
 target_include_directories(MyStore PRIVATE cpp-dotenv/src/cpp-dotenv/)
 
 target_link_libraries(MyStore thrift)
 target_link_libraries(MyStore pthread)
+target_link_libraries(MyStore ThriftFileCompilation)

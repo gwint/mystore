@@ -135,14 +135,14 @@ def displayClusterInfoWithCommaSep(clusterInfo):
 
     print()
 
-def get(key):
+def get(key, numPastMappings):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
-    ret = getHelper(key, hostIP, nextRequestIdentifier)
+    ret = getHelper(key, hostIP, nextRequestIdentifier, numPastMappings)
 
     return ret
 
-def getHelper(key, clientIdentifier, requestNumber):
+def getHelper(key, clientIdentifier, requestNumber, numPastMappings):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -168,14 +168,14 @@ def getHelper(key, clientIdentifier, requestNumber):
 
                     logger.debug(f'Now contacting ({host}:{port}) to resolve GET')
 
-                    response = client.get(str(key), clientIdentifier, currentRequestNumber)
+                    response = client.get(str(key), clientIdentifier, currentRequestNumber, numPastMappings)
 
                     if response.success:
-                        logger.debug(f'GET request successfully resolved: {response.value} is the value retreived')
+                        logger.debug(f'GET request successfully resolved: {response.values} is the value retreived')
                         open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
                         setNextRequestIdentifier(currentRequestNumber + 1)
 
-                        return response.value
+                        return response.values
 
                     elif isNullID(response.leaderID):
                         logger.debug(f'GET request unsuccessful and current leader is unknown')
@@ -373,6 +373,7 @@ if __name__ == "__main__":
 
     getParser = subparsers.add_parser("get", help="Used to read value associated with a given key")
     getParser.add_argument("key", help="Key whose associated value will be retreived")
+    getParser.add_argument("-rev", nargs="?", type=int, default=0)
 
     args = parser.parse_args()
 
@@ -389,7 +390,8 @@ if __name__ == "__main__":
             print("PUT Request Failed")
     elif args.command == "get":
         try:
-            print(get(args.key))
+            for val in get(args.key, args.rev):
+                print(val)
         except GetFailureException:
             print("GET Request Failed")
     else:
