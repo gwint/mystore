@@ -14,7 +14,6 @@
 #include "replica.hpp"
 #include "lockhandler.hpp"
 #include "locknames.hpp"
-#include "states.hpp"
 
 #include "dotenv.h"
 #include "spdlog/spdlog.h"
