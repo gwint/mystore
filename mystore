@@ -40,6 +40,9 @@ class PutFailureException(Exception):
 class GetFailureException(Exception):
     pass
 
+class DelFailureException(Exception):
+    pass
+
 def isNullID(id):
     return (not id.hostname) and id.port == 0
 
@@ -135,12 +138,76 @@ def displayClusterInfoWithCommaSep(clusterInfo):
 
     print()
 
+def delKey(key):
+    nextRequestIdentifier = getNextRequestIdentifier()
+    hostIP = gethostbyname(gethostname())
+
+    return delKeyHelper(key, hostIP, nextRequestIdentifier)
+
+def delKeyHelper(key, clientIdentifier, requestNumber):
+    leaderInfo = getLeaderInfo()
+    if not leaderInfo:
+        leaderInfo = getRandomReplica()
+
+    numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
+    numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
+    pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
+
+    currentRequestNumber = requestNumber
+    host, port = leaderInfo
+
+    for cycleNum in range(numCyclesBeforeQuitting):
+        logger.debug(f'Now entering cycle {cycleNum} for DEL request')
+        for retryNum in range(numRetriesBeforeChangingRequestID):
+            logger.debug(f'Request Identifier {currentRequestNumber} being used for DEL attempt {retryNum}')
+            transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
+            transport = TTransport.TBufferedTransport(transport)
+
+            try:
+                transport.open()
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
+
+                logger.debug(f'Now contacting ({host}:{port}) to resolve DEL')
+
+                try:
+                    response = client.deletekey(str(key), clientIdentifier, currentRequestNumber)
+
+                    if response.success:
+                        logger.debug(f'DEL request successfully resolved')
+                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
+                        setNextRequestIdentifier(currentRequestNumber + 1)
+
+                        return True
+
+                    elif isNullID(response.leaderID):
+                        logger.debug(f'DEL request unsuccessful and current leader is unknown')
+                        host, port = getRandomReplica()
+                    else:
+                        logger.debug(f'DEL request unsuccessful')
+                        host = response.leaderID.hostname
+                        port = response.leaderID.port
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
+
+            except TTransport.TTransportException as e:
+                logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
+                host, port = getRandomReplica()
+
+            sleep((pauseDurationAfterRetryMS / 1000) * 2)
+
+        currentRequestNumber += 1
+
+    raise DelFailureException()
+
 def get(key, numPastMappings):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
-    ret = getHelper(key, hostIP, nextRequestIdentifier, numPastMappings)
 
-    return ret
+    return getHelper(key, hostIP, nextRequestIdentifier, numPastMappings)
 
 def getHelper(key, clientIdentifier, requestNumber, numPastMappings):
     leaderInfo = getLeaderInfo()
@@ -202,9 +269,8 @@ def getHelper(key, clientIdentifier, requestNumber, numPastMappings):
 def put(key, value):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
-    ret = putHelper(key, value, hostIP, nextRequestIdentifier)
 
-    return ret
+    return putHelper(key, value, hostIP, nextRequestIdentifier)
 
 def putHelper(key, value, clientIdentifier, requestNumber):
     leaderInfo = getLeaderInfo()
@@ -375,6 +441,9 @@ if __name__ == "__main__":
     getParser.add_argument("key", help="Key whose associated value will be retreived")
     getParser.add_argument("-rev", nargs="?", type=int, default=0)
 
+    delKeyParser = subparsers.add_parser("del", help="Used to remove a given key from the cluster")
+    delKeyParser.add_argument("key", help="Key to be removed from the cluster")
+
     args = parser.parse_args()
 
     if args.command == "start":
@@ -394,5 +463,7 @@ if __name__ == "__main__":
                 print(val)
         except GetFailureException:
             print("GET Request Failed")
+    elif args.command == "del":
+        print(delKey(args.key))
     else:
         parser.error("No command provided: must be one of (start, kill, members, put, get)")
