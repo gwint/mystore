@@ -107,5 +107,7 @@ service ReplicaService {
                         6:binary data,
                         7:bool done),
 
-    bool addNewConfiguration(1:list<ID> endpoints)
+    bool addNewConfiguration(1:list<ID> endpoints,
+                             2:string clientIdentifier,
+                             3:i32 requestIdentifier)
 }

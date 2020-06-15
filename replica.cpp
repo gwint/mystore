@@ -65,8 +65,8 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
                                       leader(Replica::getNullID()),
                                       currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                       hasOperationStarted(false),
-                                      clusterMembership(Replica::getClusterMembership()),
-                                      lockHandler(14),
+                                      clusterMembership(Replica::readMembershipFile()),
+                                      lockHandler(15),
                                       noopIndex(0) {
 
     this->timeLeft = this->timeout;
@@ -83,14 +83,14 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     this->myID.hostname = std::string(ip);
     this->myID.port = port;
 
-    auto it = this->clusterMembership.begin();
-    for(; it != this->clusterMembership.end(); ++it) {
+    auto it = this->getClusterMembership().begin();
+    for(; it != this->getClusterMembership().end(); ++it) {
         if(this->myID == *it) {
             break;
         }
     }
 
-    this->clusterMembership.erase(it);
+    this->getClusterMembership().erase(it);
 
     this->lockHandler.lockAll();
 
@@ -173,7 +173,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::MAP_LOCK,
                                    LockName::TIMER_LOCK,
                                    LockName::COMMIT_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -209,7 +210,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                        LockName::MAP_LOCK,
                                        LockName::TIMER_LOCK,
                                        LockName::COMMIT_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         return;
     }
@@ -294,7 +296,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::MAP_LOCK,
                                    LockName::TIMER_LOCK,
                                    LockName::COMMIT_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 }
 
 void
@@ -309,7 +312,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -338,14 +342,15 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
                                        LockName::LATEST_NO_OP_LOG_INDEX,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         return;
     }
 
     unsigned int numReplicasSuccessfullyContacted = 1;
 
-    for(const auto &id : this->clusterMembership) {
+    for(const auto &id : this->getClusterMembership()) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -400,7 +405,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                                    LockName::VOTED_FOR_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
                                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                                   LockName::SNAPSHOT_LOCK);
+                                                   LockName::SNAPSHOT_LOCK,
+                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
                     return;
                 }
@@ -422,7 +428,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                                    LockName::VOTED_FOR_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
                                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                                   LockName::SNAPSHOT_LOCK);
+                                                   LockName::SNAPSHOT_LOCK,
+                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
                     return;
                 }
@@ -453,7 +460,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         }
     }
 
-    if(numReplicasSuccessfullyContacted < ((this->clusterMembership.size()+1) / 2) + 1) {
+    if(numReplicasSuccessfullyContacted < ((this->getClusterMembership().size()+1) / 2) + 1) {
         _return.success = false;
 
         #ifndef NDEBUG
@@ -470,7 +477,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
                                        LockName::LATEST_NO_OP_LOG_INDEX,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         return;
     }
@@ -506,7 +514,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    LockName::VOTED_FOR_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
 }
 
@@ -521,7 +530,8 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     _return.success = true;
 
@@ -552,7 +562,8 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         return;
     }
@@ -605,7 +616,8 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         return;
     }
@@ -628,7 +640,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
     unsigned int numServersReplicatedOn = 1;
 
-    for(const auto &id : this->clusterMembership) {
+    for(const auto &id : this->getClusterMembership()) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -680,7 +692,8 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                                                LockName::NEXT_INDEX_LOCK,
                                                LockName::LAST_APPLIED_LOCK,
                                                LockName::MATCH_INDEX_LOCK,
-                                               LockName::SNAPSHOT_LOCK);
+                                               LockName::SNAPSHOT_LOCK,
+                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
 
                 return;
             }
@@ -727,11 +740,11 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
     _return.leaderID = this->leader;
 
-    if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
+    if(numServersReplicatedOn < ((this->getClusterMembership().size() + 1) / 2) + 1) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
-             numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1);
+             numServersReplicatedOn  << "/" <<  ((this->getClusterMembership().size() + 1 / 2) + 1);
         this->logMsg(msg.str());
         #endif
 
@@ -761,7 +774,8 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     return;
 }
@@ -777,7 +791,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     _return.success = true;
 
@@ -808,7 +823,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         return;
     }
@@ -861,7 +877,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::LAST_APPLIED_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         return;
     }
@@ -885,7 +902,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     unsigned int numServersReplicatedOn = 1;
 
-    for(const auto &id : this->clusterMembership) {
+    for(const auto &id : this->getClusterMembership()) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -937,7 +954,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                                LockName::NEXT_INDEX_LOCK,
                                                LockName::LAST_APPLIED_LOCK,
                                                LockName::MATCH_INDEX_LOCK,
-                                               LockName::SNAPSHOT_LOCK);
+                                               LockName::SNAPSHOT_LOCK,
+                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
 
                 return;
             }
@@ -984,7 +1002,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     _return.leaderID = this->leader;
 
-    if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
+    if(numServersReplicatedOn < ((this->getClusterMembership().size() + 1) / 2) + 1) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
@@ -1023,7 +1041,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                    LockName::NEXT_INDEX_LOCK,
                                    LockName::LAST_APPLIED_LOCK,
                                    LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     return;
 }
@@ -1085,7 +1104,8 @@ Replica::timer() {
                                        LockName::LEADER_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         if(this->state == ReplicaState::LEADER) {
             this->lockHandler.releaseLocks(LockName::STATE_LOCK,
@@ -1097,7 +1117,8 @@ Replica::timer() {
                                            LockName::LEADER_LOCK,
                                            LockName::NEXT_INDEX_LOCK,
                                            LockName::MATCH_INDEX_LOCK,
-                                           LockName::SNAPSHOT_LOCK);
+                                           LockName::SNAPSHOT_LOCK,
+                                           LockName::CLUSTER_MEMBERSHIP_LOCK);
 
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             continue;
@@ -1114,7 +1135,7 @@ Replica::timer() {
             this->timeLeft = this->timeout;
             ++(this->currentTerm);
 
-            for(auto const& id : this->clusterMembership) {
+            for(auto const& id : this->getClusterMembership()) {
                 #ifndef NDEBUG
                 msg.str("");
                 msg << "Now requesting vote from ";
@@ -1175,7 +1196,7 @@ Replica::timer() {
                 this->logMsg(msg.str());
                 #endif
 
-                if(votesReceived >= ((this->clusterMembership.size()+1) / 2) + 1) {
+                if(votesReceived >= ((this->getClusterMembership().size()+1) / 2) + 1) {
                     this->state = ReplicaState::LEADER;
                     this->leader = this->myID;
                     this->noopIndex = this->log.size();
@@ -1189,7 +1210,7 @@ Replica::timer() {
 
                     this->log.push_back(noopEntry);
 
-                    for(auto const& id : this->clusterMembership) {
+                    for(auto const& id : this->getClusterMembership()) {
                         this->nextIndex[id] = this->log.size()-1;
                         this->matchIndex[id] = 0;
 
@@ -1287,7 +1308,8 @@ Replica::timer() {
                                        LockName::LEADER_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -1305,7 +1327,8 @@ Replica::heartbeatSender() {
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         if(this->state != ReplicaState::LEADER) {
             this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
@@ -1315,7 +1338,8 @@ Replica::heartbeatSender() {
                                            LockName::VOTED_FOR_LOCK,
                                            LockName::NEXT_INDEX_LOCK,
                                            LockName::MATCH_INDEX_LOCK,
-                                           LockName::SNAPSHOT_LOCK);
+                                           LockName::SNAPSHOT_LOCK,
+                                           LockName::CLUSTER_MEMBERSHIP_LOCK);
 
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             continue;
@@ -1359,7 +1383,7 @@ Replica::heartbeatSender() {
             applyEntry(this->log.at(this->lastApplied));
         }
 
-        for(const ID& id : this->clusterMembership) {
+        for(const ID& id : this->getClusterMembership()) {
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
             socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
             socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -1460,7 +1484,8 @@ Replica::heartbeatSender() {
                                        LockName::VOTED_FOR_LOCK,
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+                                       LockName::SNAPSHOT_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(this->heartbeatTick));
     }
@@ -1493,7 +1518,8 @@ Replica::retryRequest() {
                                            LockName::NEXT_INDEX_LOCK,
                                            LockName::MATCH_INDEX_LOCK,
                                            LockName::LOG_LOCK,
-                                           LockName::SNAPSHOT_LOCK);
+                                           LockName::SNAPSHOT_LOCK,
+                                           LockName::CLUSTER_MEMBERSHIP_LOCK);
 
             Entry entry = this->log.at(job.entryPosition);
 
@@ -1508,7 +1534,8 @@ Replica::retryRequest() {
                                                LockName::NEXT_INDEX_LOCK,
                                                LockName::MATCH_INDEX_LOCK,
                                                LockName::LOG_LOCK,
-                                               LockName::SNAPSHOT_LOCK);
+                                               LockName::SNAPSHOT_LOCK,
+                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
 
                 break;
             }
@@ -1567,7 +1594,8 @@ Replica::retryRequest() {
                                                    LockName::NEXT_INDEX_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
                                                    LockName::LOG_LOCK,
-                                                   LockName::SNAPSHOT_LOCK);
+                                                   LockName::SNAPSHOT_LOCK,
+                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
                     break;
                 }
@@ -1586,7 +1614,8 @@ Replica::retryRequest() {
                                                    LockName::NEXT_INDEX_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
                                                    LockName::LOG_LOCK,
-                                                   LockName::SNAPSHOT_LOCK);
+                                                   LockName::SNAPSHOT_LOCK,
+                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
                 }
                 else {
                     #ifndef NDEBUG
@@ -1606,7 +1635,8 @@ Replica::retryRequest() {
                                                    LockName::NEXT_INDEX_LOCK,
                                                    LockName::MATCH_INDEX_LOCK,
                                                    LockName::LOG_LOCK,
-                                                   LockName::SNAPSHOT_LOCK);
+                                                   LockName::SNAPSHOT_LOCK,
+                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
                     break;
                 }
             }
@@ -1698,34 +1728,83 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
 }
 
 bool
-Replica::addNewConfiguration(const std::vector<ID>& newConfiguration) {
+Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std::string& clientIdentifier, const int32_t requestIdentifier) {
     this->lockHandler.acquireLocks(LockName::LOG_LOCK,
                                    LockName::CURR_TERM_LOCK,
                                    LockName::STATE_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK);
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     if(this->state != ReplicaState::LEADER) {
         return false;
     }
 
+    if(requestIdentifier == this->currentRequestBeingServiced) {
+        #ifndef NDEBUG
+        msg.str("");
+        msg << "Continuing servicing of request " << requestIdentifier;
+        this->logMsg(msg.str());
+        #endif
+
+        unsigned int relevantEntryIndex = 0;
+        for(unsigned int entryIndex = 0; entryIndex < this->log.size(); ++entryIndex) {
+            if(this->log.at(entryIndex).requestIdentifier == requestIdentifier) {
+                relevantEntryIndex = entryIndex;
+                break;
+            }
+        }
+
+        assert(relevantEntryIndex != 0);
+
+        bool entryIsFromCurrentTerm = (this->log.at(relevantEntryIndex).term == this->currentTerm);
+
+        std::vector<int> matchIndices;
+        for(auto pair : this->matchIndex) {
+            matchIndices.push_back(pair.second);
+        }
+        matchIndices.push_back(this->log.size()-1);
+
+        #ifndef NDEBUG
+        msg.str("");
+        msg << "Is this entry from this term? = " << entryIsFromCurrentTerm;
+        this->logMsg(msg.str());
+
+        msg.str("");
+        msg << "Has the entry been successfully replicated on a majority of replicas " <<
+                                 areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
+        this->logMsg(msg.str());
+        #endif
+
+        this->lockHandler.releaseLocks(LockName::LOG_LOCK,
+                                       LockName::CURR_TERM_LOCK,
+                                       LockName::STATE_LOCK,
+                                       LockName::COMMIT_INDEX_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+
+        return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
+    }
+
+    this->currentRequestBeingServiced = requestIdentifier;
+
+    std::set<ID> oldConfigurationIDs(this->getClusterMembership().begin(), this->getClusterMembership().end());
+    std::set<ID> newConfigurationIDs(newConfiguration.begin(), newConfiguration.end());
+
+    this->clusterMembership.clear();
+
+    set_union(oldConfigurationIDs.begin(), oldConfigurationIDs.end(),
+              newConfigurationIDs.begin(), newConfigurationIDs.end(),
+              std::inserter(this->clusterMembership, this->clusterMembership.begin()));
+
     Entry newConfigurationEntry;
     newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
-    newConfigurationEntry.newConfiguration = newConfiguration;
+    newConfigurationEntry.newConfiguration = this->clusterMembership;
     newConfigurationEntry.term = this->currentTerm;
 
     this->log.push_back(newConfigurationEntry);
 
-    std::set<ID> oldConfigurationIDs(this->clusterMembership.begin(), this->clusterMembership.end());
-    std::set<ID> newConfigurationIDs(newConfiguration.begin(), newConfiguration.end());
-    std::set<ID> oldAndNewConfigurationIDs;
+    int replicationAmount = 0;
 
-    oldAndNewConfigurationIDs.insert(oldConfigurationIDs.begin(), oldConfigurationIDs.end());
-    oldAndNewConfigurationIDs.insert(newConfigurationIDs.begin(), newConfigurationIDs.end());
-
-    int oldConfigurationReplicationCount = 0,
-        newConfigurationReplicationCount = 0;
-
-    for(const ID& id : oldAndNewConfigurationIDs) {
+    for(const ID& id : this->getClusterMembership()) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -1761,17 +1840,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration) {
                     this->votedFor = Replica::getNullID();
                 }
                 else {
-                    if(oldConfigurationIDs.find(id) != oldConfigurationIDs.end() &&
-                       newConfigurationIDs.find(id) != newConfigurationIDs.end()) {
-                        ++oldConfigurationReplicationCount;
-                        ++newConfigurationReplicationCount;
-                    }
-                    else if(oldConfigurationIDs.find(id) != oldConfigurationIDs.end()) {
-                        ++oldConfigurationReplicationCount;
-                    }
-                    else {
-                        ++newConfigurationReplicationCount;
-                    }
+                    ++replicationAmount;
                 }
             }
             catch(TTransportException& e) {
@@ -1781,15 +1850,101 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration) {
         }
     }
 
-    if(oldConfigurationReplicationCount >= ((this->clusterMembership.size() + 1) / 2) + 1 &&
-       newConfigurationReplicationCount >= ((newConfiguration.size() + 1) / 2) + 1) {
-        // try to replicate c_new entry
+    if(replicationAmount >= ((this->getClusterMembership().size() + 1) / 2) + 1) {
+        Entry newConfigurationEntry;
+        newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
+        newConfigurationEntry.newConfiguration = newConfiguration;
+        newConfigurationEntry.term = this->currentTerm;
+
+        this->clusterMembership = newConfiguration;
+
+        int replicationAmount = 0;
+        for(const ID& id : this->getClusterMembership()) {
+            std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+
+            std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+            ReplicaServiceClient client(protocol);
+
+            try {
+                transport->open();
+
+                try {
+                    AppendEntryResponse appendEntryResponse;
+                    client.appendEntry(appendEntryResponse,
+                                       this->currentTerm,
+                                       this->myID,
+                                       this->log.size()-2,
+                                       this->log.at(this->log.size()-2).term,
+                                       newConfigurationEntry,
+                                       this->commitIndex);
+
+                    if(appendEntryResponse.term > this->currentTerm) {
+                        this->state = ReplicaState::FOLLOWER;
+                        this->currentTerm = appendEntryResponse.term;
+                        this->votedFor = Replica::getNullID();
+                        break;
+                    }
+
+                    if(!appendEntryResponse.success) {
+                        this->currentTerm = appendEntryResponse.term;
+                        this->state = ReplicaState::FOLLOWER;
+                        this->votedFor = Replica::getNullID();
+                    }
+                    else {
+                        ++replicationAmount;
+                    }
+                }
+                catch(TTransportException& e) {
+                }
+            }
+            catch(TTransportException& e) {
+            }
+        }
+
+        if(replicationAmount >= ((this->getClusterMembership().size() + 1) / 2) + 1) {
+            for(const ID& id : oldConfigurationIDs) {
+                if(newConfigurationIDs.find(id) == newConfigurationIDs.end()) {
+                    std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+                    socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                    socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                    socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+
+                    std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+                    std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+                    ReplicaServiceClient client(protocol);
+
+                    try {
+                        transport->open();
+
+                        try {
+                            client.kill();
+                        }
+                        catch(TTransportException& e) {
+                        }
+                    }
+                    catch(TTransportException& e) {
+                    }
+                }
+            }
+
+            this->clusterMembership = newConfiguration;
+
+            std::ofstream membershipFileObj("cluster.membership");
+            for(const ID& id : this->clusterMembership) {
+                membershipFileObj << id.hostname << ":" << id.port << "\n";
+            }
+        }
     }
 
     this->lockHandler.releaseLocks(LockName::LOG_LOCK,
                                    LockName::CURR_TERM_LOCK,
                                    LockName::STATE_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK);
+                                   LockName::COMMIT_INDEX_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
 
     return true;
 }
@@ -1818,7 +1973,7 @@ Replica::getElectionTimeout() {
 }
 
 std::vector<ID>
-Replica::getClusterMembership() {
+Replica::readMembershipFile() {
     std::vector<ID> membership;
     std::ifstream infile("cluster.membership");
     std::string line;
@@ -1906,6 +2061,11 @@ Replica::getNullID() {
 bool
 Replica::isANullID(const ID& id) {
     return id.hostname == "" && id.port == 0;
+}
+
+std::vector<ID>&
+Replica::getClusterMembership() {
+    return this->clusterMembership;
 }
 
 Snapshot
