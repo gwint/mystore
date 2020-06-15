@@ -1733,7 +1733,9 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                    LockName::CURR_TERM_LOCK,
                                    LockName::STATE_LOCK,
                                    LockName::COMMIT_INDEX_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                   LockName::NEXT_INDEX_LOCK,
+                                   LockName::MATCH_INDEX_LOCK);
 
     if(this->state != ReplicaState::LEADER) {
         return false;
@@ -1779,7 +1781,9 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                        LockName::CURR_TERM_LOCK,
                                        LockName::STATE_LOCK,
                                        LockName::COMMIT_INDEX_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                       LockName::NEXT_INDEX_LOCK,
+                                       LockName::MATCH_INDEX_LOCK);
 
         return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
     }
@@ -1799,6 +1803,14 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
     newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
     newConfigurationEntry.newConfiguration = this->clusterMembership;
     newConfigurationEntry.term = this->currentTerm;
+
+    for(const ID& id : newConfigurationIDs) {
+        if(this->nextIndex.find(id) == this->nextIndex.end()) {
+            assert(this->matchIndex.find(id) == this->matchIndex.end());
+            this->nextIndex[id] = this->log.size()-1;
+            this->matchIndex[id] = 0;
+        }
+    }
 
     this->log.push_back(newConfigurationEntry);
 
@@ -1944,7 +1956,9 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                    LockName::CURR_TERM_LOCK,
                                    LockName::STATE_LOCK,
                                    LockName::COMMIT_INDEX_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                   LockName::NEXT_INDEX_LOCK,
+                                   LockName::MATCH_INDEX_LOCK);
 
     return true;
 }
