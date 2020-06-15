@@ -444,6 +444,9 @@ if __name__ == "__main__":
     delKeyParser = subparsers.add_parser("del", help="Used to remove a given key from the cluster")
     delKeyParser.add_argument("key", help="Key to be removed from the cluster")
 
+    newConfigParser = subparsers.add_parser("newconfig", help="Used to change the configuration of the cluster")
+    newConfigParser.add_argument("socketaddress", nargs="+", help="IP address / port number pairs for machines included in the new cluster configuration.  Should have the form <ip addr>:<port number>.")
+
     args = parser.parse_args()
 
     if args.command == "start":
@@ -465,5 +468,7 @@ if __name__ == "__main__":
             print("GET Request Failed")
     elif args.command == "del":
         print(delKey(args.key))
+    elif args.command == "newconfig":
+        print("Now changing cluster configuration...")
     else:
         parser.error("No command provided: must be one of (start, kill, members, put, get)")
