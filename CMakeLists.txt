@@ -7,6 +7,7 @@ set(CMAKE_CXX_FLAGS "-Wall -pedantic -g -O3")
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(ServerFiles replica.cpp lockhandler.cpp replica.hpp lockhandler.hpp)
 
 ExternalProject_Add(cpp-dotenv
     PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/cpp-dotenv
@@ -21,16 +22,22 @@ ExternalProject_Add(spdlog
     INSTALL_COMMAND ""
 )
 
-set(ServerFiles replica.cpp lockhandler.cpp replica.hpp lockhandler.hpp)
+ExternalProject_Add(thrift-file
+    PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/thriftfile
+    GIT_REPOSITORY https://github.com/gwint/mystore-thrift-file.git
+    INSTALL_COMMAND ""
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+)
 
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
-    COMMAND thrift -r --gen cpp ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
-    COMMAND thrift -r --gen py ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/replicaservice.thrift
+    COMMAND thrift -r --gen cpp ${CMAKE_CURRENT_SOURCE_DIR}/thriftfile/src/thrift-file/replicaservice.thrift
+    COMMAND thrift -r --gen py ${CMAKE_CURRENT_SOURCE_DIR}/thriftfile/src/thrift-file/replicaservice.thrift
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/thriftfile/src/thrift-file/replicaservice.thrift
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -44,6 +51,7 @@ add_library(ThriftFileCompilation
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
 )
 
+add_dependencies(ThriftFileCompilation thrift-file)
 add_dependencies(MyStore ThriftFileCompilation)
 add_dependencies(MyStore spdlog)
 add_dependencies(MyStore cpp-dotenv)
