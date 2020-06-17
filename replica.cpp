@@ -83,15 +83,6 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     this->myID.hostname = std::string(ip);
     this->myID.port = port;
 
-    auto it = this->clusterMembership.begin();
-    for(; it != this->clusterMembership.end(); ++it) {
-        if(this->myID == *it) {
-            break;
-        }
-    }
-
-    this->clusterMembership.erase(it);
-
     this->lockHandler.lockAll();
 
     spdlog::set_pattern("[%H:%M:%S:%e] %v");
