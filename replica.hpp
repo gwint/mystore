@@ -2,6 +2,7 @@
 #define REPLICA_H
 
 #include <unordered_map>
+#include <set>
 #include <utility>
 #include <queue>
 #include <stack>
@@ -56,6 +57,7 @@ class Replica : virtual public ReplicaServiceIf {
         std::queue<Job> jobsToRetry;
         bool hasOperationStarted;
         std::vector<ID> clusterMembership;
+        std::set<ID> nonVotingMembers;
         LockHandler lockHandler;
         std::shared_ptr<spdlog::logger> logger;
         int noopIndex;
@@ -92,7 +94,6 @@ class Replica : virtual public ReplicaServiceIf {
 
     public:
         Replica(unsigned int);
-        std::vector<ID>& getClusterMembership();
 
         void requestVote(Ballot&, const int32_t, const ID&, const int32_t, const int32_t);
         void appendEntry(AppendEntryResponse&, const int32_t, const ID&, const int32_t, const int32_t, const Entry&, const int32_t);

@@ -83,14 +83,14 @@ Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
     this->myID.hostname = std::string(ip);
     this->myID.port = port;
 
-    auto it = this->getClusterMembership().begin();
-    for(; it != this->getClusterMembership().end(); ++it) {
+    auto it = this->clusterMembership.begin();
+    for(; it != this->clusterMembership.end(); ++it) {
         if(this->myID == *it) {
             break;
         }
     }
 
-    this->getClusterMembership().erase(it);
+    this->clusterMembership.erase(it);
 
     this->lockHandler.lockAll();
 
@@ -244,6 +244,11 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
         this->log.push_back(entry);
 
+        if(entry.type == EntryType::CONFIG_CHANGE_ENTRY) {
+            this->nonVotingMembers = entry.nonVotingMembers;
+            this->clusterMembership = entry.newConfiguration;
+        }
+
         #ifndef NDEBUG
         if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
             this->currentSnapshot = this->getSnapshot();
@@ -350,7 +355,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
 
     unsigned int numReplicasSuccessfullyContacted = 1;
 
-    for(const auto &id : this->getClusterMembership()) {
+    for(const auto &id : this->clusterMembership) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -411,7 +416,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                     return;
                 }
 
-                if(appendEntryResponse.success == false) {
+                if(!appendEntryResponse.success) {
                     _return.success = false;
 
                     #ifndef NDEBUG
@@ -434,7 +439,9 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                     return;
                 }
 
-                ++numReplicasSuccessfullyContacted;
+                if(this->nonVotingMembers.find(id) == this->nonVotingMembers.end()) {
+                    ++numReplicasSuccessfullyContacted;
+                }
             }
             catch(TTransportException& e) {
                 #ifndef NDEBUG
@@ -460,7 +467,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         }
     }
 
-    if(numReplicasSuccessfullyContacted < ((this->getClusterMembership().size()+1) / 2) + 1) {
+    if(numReplicasSuccessfullyContacted < ((this->clusterMembership.size()+1) / 2) + 1) {
         _return.success = false;
 
         #ifndef NDEBUG
@@ -640,7 +647,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
     unsigned int numServersReplicatedOn = 1;
 
-    for(const auto &id : this->getClusterMembership()) {
+    for(const auto &id : this->clusterMembership) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -740,11 +747,11 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
     _return.leaderID = this->leader;
 
-    if(numServersReplicatedOn < ((this->getClusterMembership().size() + 1) / 2) + 1) {
+    if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
-             numServersReplicatedOn  << "/" <<  ((this->getClusterMembership().size() + 1 / 2) + 1);
+             numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1);
         this->logMsg(msg.str());
         #endif
 
@@ -902,7 +909,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     unsigned int numServersReplicatedOn = 1;
 
-    for(const auto &id : this->getClusterMembership()) {
+    for(const auto &id : this->clusterMembership) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -960,7 +967,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 return;
             }
 
-            if(appendEntryResponse.success == false) {
+            if(!appendEntryResponse.success) {
                 #ifndef NDEBUG
                 msg.str("");
                 msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id);
@@ -980,7 +987,10 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
                 this->matchIndex[id] = this->nextIndex.at(id);
                 ++this->nextIndex.at(id);
-                ++numServersReplicatedOn;
+
+                if(this->nonVotingMembers.find(id) == this->nonVotingMembers.end()) {
+                    ++numServersReplicatedOn;
+                }
             }
         }
         catch(TTransportException& e) {
@@ -1002,7 +1012,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     _return.leaderID = this->leader;
 
-    if(numServersReplicatedOn < ((this->getClusterMembership().size() + 1) / 2) + 1) {
+    if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
@@ -1135,7 +1145,7 @@ Replica::timer() {
             this->timeLeft = this->timeout;
             ++(this->currentTerm);
 
-            for(auto const& id : this->getClusterMembership()) {
+            for(auto const& id : this->clusterMembership) {
                 #ifndef NDEBUG
                 msg.str("");
                 msg << "Now requesting vote from ";
@@ -1196,7 +1206,7 @@ Replica::timer() {
                 this->logMsg(msg.str());
                 #endif
 
-                if(votesReceived >= ((this->getClusterMembership().size()+1) / 2) + 1) {
+                if(votesReceived >= ((this->clusterMembership.size()+1) / 2) + 1) {
                     this->state = ReplicaState::LEADER;
                     this->leader = this->myID;
                     this->noopIndex = this->log.size();
@@ -1210,7 +1220,7 @@ Replica::timer() {
 
                     this->log.push_back(noopEntry);
 
-                    for(auto const& id : this->getClusterMembership()) {
+                    for(auto const& id : this->clusterMembership) {
                         this->nextIndex[id] = this->log.size()-1;
                         this->matchIndex[id] = 0;
 
@@ -1383,7 +1393,7 @@ Replica::heartbeatSender() {
             applyEntry(this->log.at(this->lastApplied));
         }
 
-        for(const ID& id : this->getClusterMembership()) {
+        for(const ID& id : this->clusterMembership) {
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
             socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
             socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -1790,7 +1800,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
 
     this->currentRequestBeingServiced = requestIdentifier;
 
-    std::set<ID> oldConfigurationIDs(this->getClusterMembership().begin(), this->getClusterMembership().end());
+    std::set<ID> oldConfigurationIDs(this->clusterMembership.begin(), this->clusterMembership.end());
     std::set<ID> newConfigurationIDs(newConfiguration.begin(), newConfiguration.end());
 
     this->clusterMembership.clear();
@@ -1803,6 +1813,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
     newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
     newConfigurationEntry.newConfiguration = this->clusterMembership;
     newConfigurationEntry.term = this->currentTerm;
+    newConfigurationEntry.nonVotingMembers.insert(newConfigurationIDs.begin(), newConfigurationIDs.end());
 
     for(const ID& id : newConfigurationIDs) {
         if(this->nextIndex.find(id) == this->nextIndex.end()) {
@@ -1816,7 +1827,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
 
     int replicationAmount = 0;
 
-    for(const ID& id : this->getClusterMembership()) {
+    for(const ID& id : this->clusterMembership) {
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -1862,7 +1873,8 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
         }
     }
 
-    if(replicationAmount >= ((this->getClusterMembership().size() + 1) / 2) + 1) {
+/*
+    if(replicationAmount >= ((this->clusterMembership.size() + 1) / 2) + 1) {
         Entry newConfigurationEntry;
         newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
         newConfigurationEntry.newConfiguration = newConfiguration;
@@ -1871,7 +1883,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
         this->clusterMembership = newConfiguration;
 
         int replicationAmount = 0;
-        for(const ID& id : this->getClusterMembership()) {
+        for(const ID& id : this->clusterMembership) {
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
             socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
             socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -1917,7 +1929,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
             }
         }
 
-        if(replicationAmount >= ((this->getClusterMembership().size() + 1) / 2) + 1) {
+        if(replicationAmount >= ((this->clusterMembership.size() + 1) / 2) + 1) {
             for(const ID& id : oldConfigurationIDs) {
                 if(newConfigurationIDs.find(id) == newConfigurationIDs.end()) {
                     std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
@@ -1951,6 +1963,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
             }
         }
     }
+*/
 
     this->lockHandler.releaseLocks(LockName::LOG_LOCK,
                                    LockName::CURR_TERM_LOCK,
@@ -2075,11 +2088,6 @@ Replica::getNullID() {
 bool
 Replica::isANullID(const ID& id) {
     return id.hostname == "" && id.port == 0;
-}
-
-std::vector<ID>&
-Replica::getClusterMembership() {
-    return this->clusterMembership;
 }
 
 Snapshot
