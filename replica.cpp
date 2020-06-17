@@ -347,6 +347,10 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
     unsigned int numReplicasSuccessfullyContacted = 1;
 
     for(const auto &id : this->clusterMembership) {
+        if(id == this->myID) {
+            continue;
+        }
+
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -639,6 +643,10 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
     unsigned int numServersReplicatedOn = 1;
 
     for(const auto &id : this->clusterMembership) {
+        if(id == this->myID) {
+            continue;
+        }
+
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -901,6 +909,10 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     unsigned int numServersReplicatedOn = 1;
 
     for(const auto &id : this->clusterMembership) {
+        if(id == this->myID) {
+            continue;
+        }
+
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -1137,6 +1149,10 @@ Replica::timer() {
             ++(this->currentTerm);
 
             for(auto const& id : this->clusterMembership) {
+                if(id == this->myID) {
+                    continue;
+                }
+
                 #ifndef NDEBUG
                 msg.str("");
                 msg << "Now requesting vote from ";
@@ -1212,6 +1228,10 @@ Replica::timer() {
                     this->log.push_back(noopEntry);
 
                     for(auto const& id : this->clusterMembership) {
+                        if(id == this->myID) {
+                            continue;
+                        }
+
                         this->nextIndex[id] = this->log.size()-1;
                         this->matchIndex[id] = 0;
 
@@ -1385,6 +1405,10 @@ Replica::heartbeatSender() {
         }
 
         for(const ID& id : this->clusterMembership) {
+            if(id == this->myID) {
+                continue;
+            }
+
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
             socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
             socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
@@ -1819,6 +1843,10 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
     int replicationAmount = 0;
 
     for(const ID& id : this->clusterMembership) {
+        if(id == this->myID) {
+            continue;
+        }
+
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
         socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
