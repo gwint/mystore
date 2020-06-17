@@ -462,7 +462,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         }
     }
 
-    if(numReplicasSuccessfullyContacted < ((this->clusterMembership.size()+1) / 2) + 1) {
+    if(numReplicasSuccessfullyContacted < (this->clusterMembership.size() / 2) + 1) {
         _return.success = false;
 
         #ifndef NDEBUG
@@ -704,7 +704,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                 return;
             }
 
-            if(appendEntryResponse.success == false) {
+            if(!appendEntryResponse.success) {
                 #ifndef NDEBUG
                 msg.str("");
                 msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id);
@@ -724,7 +724,10 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
                 this->matchIndex[id] = this->nextIndex.at(id);
                 ++this->nextIndex.at(id);
-                ++numServersReplicatedOn;
+
+                if(this->nonVotingMembers.find(id) == this->nonVotingMembers.end()) {
+                    ++numServersReplicatedOn;
+                }
             }
         }
         catch(TTransportException& e) {
@@ -746,7 +749,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
     _return.leaderID = this->leader;
 
-    if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
+    if(numServersReplicatedOn < (this->clusterMembership.size() / 2) + 1) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
@@ -1015,7 +1018,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     _return.leaderID = this->leader;
 
-    if(numServersReplicatedOn < ((this->clusterMembership.size() + 1) / 2) + 1) {
+    if(numServersReplicatedOn < (this->clusterMembership.size() / 2) + 1) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
@@ -1213,7 +1216,7 @@ Replica::timer() {
                 this->logMsg(msg.str());
                 #endif
 
-                if(votesReceived >= ((this->clusterMembership.size()+1) / 2) + 1) {
+                if(votesReceived >= (this->clusterMembership.size() / 2) + 1) {
                     this->state = ReplicaState::LEADER;
                     this->leader = this->myID;
                     this->noopIndex = this->log.size();
@@ -1263,7 +1266,7 @@ Replica::timer() {
                                     this->votedFor = Replica::getNullID();
                                 }
 
-                                if(appendEntryResponse.success == false) {
+                                if(!appendEntryResponse.success) {
                                     #ifndef NDEBUG
                                     msg.str("");
                                     msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
@@ -1450,7 +1453,7 @@ Replica::heartbeatSender() {
                     }
 
 
-                    if(appendEntryResponse.success == false) {
+                    if(!appendEntryResponse.success) {
                         #ifndef NDEBUG
                         msg.str("");
                         msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
@@ -1625,7 +1628,7 @@ Replica::retryRequest() {
                     break;
                 }
 
-                if(appendEntryResponse.success == false) {
+                if(!appendEntryResponse.success) {
                     #ifndef NDEBUG
                     msg.str("");
                     msg << "AppendEntryRequest retry to " << targetID << " failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!";
