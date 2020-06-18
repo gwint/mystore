@@ -1018,7 +1018,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     _return.leaderID = this->leader;
 
-    if(numServersReplicatedOn < (this->clusterMembership.size() / 2) + 1) {
+    if(numServersReplicatedOn < ((this->clusterMembership.size()-this->nonVotingMembers.size()) / 2) + 1) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
@@ -1831,9 +1831,12 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
     newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
     newConfigurationEntry.newConfiguration = this->clusterMembership;
     newConfigurationEntry.term = this->currentTerm;
-    newConfigurationEntry.nonVotingMembers.insert(newConfigurationIDs.begin(), newConfigurationIDs.end());
 
     for(const ID& id : newConfigurationIDs) {
+        if(oldConfigurationIDs.find(id) == oldConfigurationIDs.end()) {
+            newConfigurationEntry.nonVotingMembers.insert(id);
+        }
+
         if(this->nextIndex.find(id) == this->nextIndex.end()) {
             assert(this->matchIndex.find(id) == this->matchIndex.end());
             this->nextIndex[id] = this->log.size()-1;

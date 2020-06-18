@@ -43,6 +43,9 @@ class GetFailureException(Exception):
 class DelFailureException(Exception):
     pass
 
+class ConfigurationInstallationException(Exception):
+    pass
+
 def isNullID(id):
     return (not id.hostname) and id.port == 0
 
@@ -331,8 +334,72 @@ def putHelper(key, value, clientIdentifier, requestNumber):
 
     raise PutFailureException()
 
-def getLeaderInfo():
+def addNewConfiguration(newSocketAddrLst):
+    nextRequestIdentifier = getNextRequestIdentifier()
+    hostIP = gethostbyname(gethostname())
 
+    return putHelper(newSocketAddrLst, hostIP, nextRequestIdentifier)
+
+def addNewConfigurationHelper(newSocketAddrLst, clientIdentifier, requestNumber):
+    leaderInfo = getLeaderInfo()
+    if not leaderInfo:
+        leaderInfo = getRandomReplica()
+
+    numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
+    numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
+    pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
+
+    currentRequestNumber = requestNumber
+    host, port = leaderInfo
+
+    for cycleNum in range(numCyclesBeforeQuitting):
+        logger.debug(f'Now entering cycle {cycleNum} for NEWCONFIG request')
+        for retryNum in range(numRetriesBeforeChangingRequestID):
+            logger.debug(f'Request Identifier {currentRequestNumber} being used for NEWCONFIG attempt {retryNum}')
+            transport = TSocket.TSocket(host, port)
+            transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
+            transport = TTransport.TBufferedTransport(transport)
+
+            try:
+                transport.open()
+                protocol = TBinaryProtocol.TBinaryProtocol(transport)
+                client = ReplicaService.Client(protocol)
+
+                logger.debug(f'Now contacting ({host}:{port}) to resolve NEWCONFIG')
+
+                try:
+                    response = client.addNewConfiguration(newSocketAddrLst, clientIdentifier, currentRequestNumber)
+
+                    if response.success:
+                        logger.debug(f'NEWCONFIG request successfully resolved')
+                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
+                        setNextRequestIdentifier(currentRequestNumber + 1)
+
+                        return True
+
+                    elif isNullID(response.leaderID):
+                        logger.debug(f'NEWCONFIG request unsuccessful and current leader is unknown')
+                        host, port = getRandomReplica()
+                    else:
+                        logger.debug(f'NEWCONFIG request unsuccessful')
+                        host = response.leaderID.hostname
+                        port = response.leaderID.port
+
+                except TTransport.TTransportException as e:
+                    if isinstance(e.inner, timeout):
+                        logger.debug(f'Experienced timeout error while contacting ({host}:{port})')
+
+            except TTransport.TTransportException as e:
+                logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
+                host, port = getRandomReplica()
+
+            sleep((pauseDurationAfterRetryMS / 1000) * 2)
+
+        currentRequestNumber += 1
+
+    raise ConfigurationInstallationException()
+
+def getLeaderInfo():
     if ospath.exists(getenv("CURRENT_LEADER_INFO_FILE")):
         leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')
         leaderAddr = leaderInfoFileObj.read().strip()
@@ -445,7 +512,7 @@ if __name__ == "__main__":
     delKeyParser.add_argument("key", help="Key to be removed from the cluster")
 
     newConfigParser = subparsers.add_parser("newconfig", help="Used to change the configuration of the cluster")
-    newConfigParser.add_argument("socketaddress", nargs="+", help="IP address / port number pairs for machines included in the new cluster configuration.  Should have the form <ip addr>:<port number>.")
+    newConfigParser.add_argument("socketaddresses", nargs="+", help="IP address / port number pairs for machines included in the new cluster configuration.  Should have the form <ip addr>:<port number>.")
 
     args = parser.parse_args()
 
@@ -469,6 +536,7 @@ if __name__ == "__main__":
     elif args.command == "del":
         print(delKey(args.key))
     elif args.command == "newconfig":
-        print("Now changing cluster configuration...")
+        print(f'Now changing cluster configuration to {args.socketaddresses}')
+        print(addNewConfiguration(args.socketaddresses))
     else:
         parser.error("No command provided: must be one of (start, kill, members, put, get)")
