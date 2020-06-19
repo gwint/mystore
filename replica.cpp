@@ -57,18 +57,18 @@ const char* Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT
 const char* Replica::SNAPSHOT_FILE_ENV_VAR_NAME = "SNAPSHOT_FILE";
 const char* Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME = "MAX_ALLOWED_LOG_SIZE";
 
-Replica::Replica(unsigned int port) : state(ReplicaState::FOLLOWER),
-                                      currentTerm(0),
-                                      commitIndex(0),
-                                      lastApplied(0),
-                                      timeout(Replica::getElectionTimeout()),
-                                      votedFor(Replica::getNullID()),
-                                      leader(Replica::getNullID()),
-                                      currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
-                                      hasOperationStarted(false),
-                                      clusterMembership(Replica::readMembershipFile()),
-                                      lockHandler(15),
-                                      noopIndex(0) {
+Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocketAddrs) : state(ReplicaState::FOLLOWER),
+                                                                                          currentTerm(0),
+                                                                                          commitIndex(0),
+                                                                                          lastApplied(0),
+                                                                                          timeout(Replica::getElectionTimeout()),
+                                                                                          votedFor(Replica::getNullID()),
+                                                                                          leader(Replica::getNullID()),
+                                                                                          currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
+                                                                                          hasOperationStarted(false),
+                                                                                          clusterMembership(Replica::getMemberIDs(clusterSocketAddrs)),
+                                                                                          lockHandler(15),
+                                                                                          noopIndex(0) {
 
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
@@ -2026,12 +2026,11 @@ Replica::getElectionTimeout() {
 }
 
 std::vector<ID>
-Replica::readMembershipFile() {
+Replica::getMemberIDs(const std::vector<std::string>& socketAddrs) {
     std::vector<ID> membership;
-    std::ifstream infile("cluster.membership");
-    std::string line;
-    while(std::getline(infile, line)) {
-        std::stringstream ss(line);
+
+    for(const std::string& addr : socketAddrs) {
+        std::stringstream ss(addr);
         std::string host;
         std::string portStr;
 
@@ -2147,7 +2146,6 @@ ID::operator<(const ID& other) const {
 
 int
 main(int argc, const char** argv) {
-
     ArgumentParser parser;
 
     parser.addArgument("--listeningport", 1, false);
@@ -2158,7 +2156,7 @@ main(int argc, const char** argv) {
     unsigned int portToUse = atoi(parser.retrieve<std::string>("listeningport").c_str());
     std::vector<std::string> clusterMembers = parser.retrieve<std::vector<std::string>>("clustermembership");
 
-    std::shared_ptr<Replica> handler(new Replica(portToUse));
+    std::shared_ptr<Replica> handler(new Replica(portToUse, clusterMembers));
     std::shared_ptr<apache::thrift::TProcessor> processor(new ReplicaServiceProcessor(handler));
     std::shared_ptr<apache::thrift::transport::TServerTransport> serverTransport(new apache::thrift::transport::TServerSocket(portToUse));
     std::shared_ptr<apache::thrift::transport::TTransportFactory> transportFactory(new apache::thrift::transport::TBufferedTransportFactory());

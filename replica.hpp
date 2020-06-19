@@ -68,7 +68,7 @@ class Replica : virtual public ReplicaServiceIf {
 
         static Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();
-        static std::vector<ID> readMembershipFile();
+        static std::vector<ID> getMemberIDs(const std::vector<std::string>&);
         static ID getNullID();
         static bool isANullID(const ID&);
 
@@ -93,7 +93,7 @@ class Replica : virtual public ReplicaServiceIf {
         static const char* MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME;
 
     public:
-        Replica(unsigned int);
+        Replica(unsigned int, const std::vector<std::string>&);
 
         void requestVote(Ballot&, const int32_t, const ID&, const int32_t, const int32_t);
         void appendEntry(AppendEntryResponse&, const int32_t, const ID&, const int32_t, const int32_t, const Entry&, const int32_t);
