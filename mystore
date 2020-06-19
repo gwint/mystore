@@ -443,34 +443,6 @@ def getRandomReplica():
 
     return replicaInfo[randrange(len(replicaInfo))]
 
-def start():
-    try:
-        with open(getenv(CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME)) as membershipFileObj:
-            for addr in membershipFileObj.readlines():
-                host, portStr = tuple(addr.split(':'))
-                port = int(portStr)
-
-                transport = TSocket.TSocket(host, port)
-                transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
-                transport = TTransport.TBufferedTransport(transport)
-
-                try:
-                    transport.open()
-
-                    try:
-                        protocol = TBinaryProtocol.TBinaryProtocol(transport)
-                        client = ReplicaService.Client(protocol)
-                        client.start()
-
-                    except TTransport.TTransportException as e:
-                        logger.debug(f'Experienced error while attempting to start operation of replica at ({host}:{port})')
-
-                except TTransport.TTransportException as e:
-                    logger.debug(f'Experienced transport error while establishing connection to start replica at ({host}:{port}): {str(e)}')
-
-    except FileNotFoundError:
-        print(f'You must create a cluster.membership file that contains the host:port pairs for all replicas in the cluster')
-
 def getNextRequestIdentifier():
     if not ospath.exists(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME)):
         with open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w') as nextIdentifierFileObj:
@@ -516,9 +488,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.command == "start":
-        start()
-    elif args.command == "kill":
+    if args.command == "kill":
         killReplica(args.url)
     elif args.command == "members":
         listClusterMembers(args.table)
@@ -539,4 +509,4 @@ if __name__ == "__main__":
         print(f'Now changing cluster configuration to {args.socketaddresses}')
         print(addNewConfiguration(args.socketaddresses))
     else:
-        parser.error("No command provided: must be one of (start, kill, members, put, get)")
+        parser.error("No command provided: must be one of (kill, members, put, get)")

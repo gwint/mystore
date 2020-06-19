@@ -84,8 +84,6 @@ Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocke
     this->myID.hostname = std::string(ip);
     this->myID.port = port;
 
-    this->lockHandler.lockAll();
-
     spdlog::set_pattern("[%H:%M:%S:%e] %v");
 
     std::stringstream logFileNameStream;
@@ -1094,15 +1092,6 @@ Replica::getInformation(std::map<std::string, std::string> & _return) {
     _return["role"] = roleStream.str();
     _return["term"] = termStream.str();
     _return["index"] = indexStream.str();
-}
-
-void
-Replica::start() {
-    std::cout << "starting operation...\n";
-    if(!this->hasOperationStarted) {
-        this->hasOperationStarted = true;
-        this->lockHandler.unlockAll();
-    }
 }
 
 void
