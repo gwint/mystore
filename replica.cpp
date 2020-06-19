@@ -19,6 +19,7 @@
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/pattern_formatter.h"
+#include "argparse.hpp"
 
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TBufferTransports.h>
@@ -2145,12 +2146,17 @@ ID::operator<(const ID& other) const {
 }
 
 int
-main(int argc, char** argv) {
-    if(argc != 2) {
-        std::cerr << "Incorrect Usage: Try ./MyStore <port-number>\n";
-    }
+main(int argc, const char** argv) {
 
-    unsigned int portToUse = atoi(argv[1]);
+    ArgumentParser parser;
+
+    parser.addArgument("--listeningport", 1, false);
+    parser.addArgument("--clustermembership", '+', false);
+
+    parser.parse(argc, argv);
+
+    unsigned int portToUse = atoi(parser.retrieve<std::string>("listeningport").c_str());
+    std::vector<std::string> clusterMembers = parser.retrieve<std::vector<std::string>>("clustermembership");
 
     std::shared_ptr<Replica> handler(new Replica(portToUse));
     std::shared_ptr<apache::thrift::TProcessor> processor(new ReplicaServiceProcessor(handler));

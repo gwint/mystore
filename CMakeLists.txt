@@ -30,6 +30,14 @@ ExternalProject_Add(thrift-file
     BUILD_COMMAND ""
 )
 
+ExternalProject_Add(argparse
+    PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/argparse
+    GIT_REPOSITORY https://github.com/hbristow/argparse.git
+    INSTALL_COMMAND ""
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+)
+
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
@@ -55,10 +63,12 @@ add_dependencies(ThriftFileCompilation thrift-file)
 add_dependencies(MyStore ThriftFileCompilation)
 add_dependencies(MyStore spdlog)
 add_dependencies(MyStore cpp-dotenv)
+add_dependencies(MyStore argparse)
 
 target_include_directories(MyStore PRIVATE gen-cpp/)
 target_include_directories(MyStore PRIVATE spdlog/src/spdlog/include/)
 target_include_directories(MyStore PRIVATE cpp-dotenv/src/cpp-dotenv/)
+target_include_directories(MyStore PRIVATE argparse/src/argparse/)
 
 target_link_libraries(MyStore thrift)
 target_link_libraries(MyStore pthread)
