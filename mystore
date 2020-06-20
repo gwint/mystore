@@ -46,6 +46,9 @@ class DelFailureException(Exception):
 class ConfigurationInstallationException(Exception):
     pass
 
+class NoTargetFoundException(Exception):
+    pass
+
 def isNullID(id):
     return (not id.hostname) and id.port == 0
 
@@ -269,13 +272,13 @@ def getHelper(key, clientIdentifier, requestNumber, numPastMappings):
 
     raise GetFailureException()
 
-def put(key, value):
+def put(key, value, target=""):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
 
-    return putHelper(key, value, hostIP, nextRequestIdentifier)
+    return putHelper(key, value, hostIP, nextRequestIdentifier, target)
 
-def putHelper(key, value, clientIdentifier, requestNumber):
+def putHelper(key, value, clientIdentifier, requestNumber, target):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
         leaderInfo = getRandomReplica()
@@ -417,7 +420,41 @@ def getLeaderInfo():
 
         return (randomHost, randomPort)
 
+def addNewReplicaToMembershipFile(newSocketAddr):
+    currentMembership = set()
+    with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r') as clusterMembershipFileObj:
+        socketAddr = clusterMembershipFileObj.readLine()
+        while socketAddr:
+            currentMembership.add(socketAddr)
+            socketAddr = clusterMembershipFileObj.readLine()
+
+    currentMembership.add(newSocketAddr)
+
+    with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'w') as clusterMembershipFileObj:
+        for socketAddr in currentMembership:
+            clusterMembershipFileObj.write(socketAddr + '\n')
+
+def removeReplicaFromMembershipFile(socketAddrToRemove):
+    currentMembership = set()
+    with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r') as clusterMembershipFileObj:
+        socketAddr = clusterMembershipFileObj.readLine()
+        while socketAddr:
+            currentMembership.add(socketAddr)
+            socketAddr = clusterMembershipFileObj.readLine()
+
+    if socketAddrToRemove not in currentMembership:
+        return
+
+    currentMembership.remove(socketAddrToRemove)
+
+    with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'w') as clusterMembershipFileObj:
+        for socketAddr in currentMembership:
+            clusterMembershipFileObj.write(socketAddr + '\n')
+
 def getRandomReplica():
+    if not os.path.exists("CLUSTER_MEMBERSHIP_FILE"):
+        raise NoTargetFoundExcepion()
+
     seed()
 
     replicaInfoFileObj = open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r')
@@ -464,8 +501,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog=f'{argv[0]}')
     subparsers = parser.add_subparsers(help="sub-command help", dest="command")
 
-    startParser = subparsers.add_parser("start", help="Start operation of the cluster")
-
     killParser = subparsers.add_parser("kill", help="Used to stop a running replica")
     killParser.add_argument("url", help="<host>:<port>")
 
@@ -475,6 +510,7 @@ if __name__ == "__main__":
     putParser = subparsers.add_parser("put", help="Used to create or update a key-value pair")
     putParser.add_argument("key", help="To be used as a key for the mapping")
     putParser.add_argument("value", help="To be used as a value for the mapping")
+    putParser.add_argument("-target", default="", help="Socket address of the replica to send initial request to")
 
     getParser = subparsers.add_parser("get", help="Used to read value associated with a given key")
     getParser.add_argument("key", help="Key whose associated value will be retreived")
@@ -494,9 +530,11 @@ if __name__ == "__main__":
         listClusterMembers(args.table)
     elif args.command == "put":
         try:
-            print(put(args.key, args.value))
+            print(put(args.key, args.value, args.target))
         except PutFailureException:
             print("PUT Request Failed")
+        except NoTargetFoundException:
+            print("PUT request failed because no target could be found: Please specify -target in the command")
     elif args.command == "get":
         try:
             for val in get(args.key, args.rev):
