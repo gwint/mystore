@@ -152,8 +152,18 @@ def delKey(key):
 
 def delKeyHelper(key, clientIdentifier, requestNumber):
     leaderInfo = getLeaderInfo()
+
     if not leaderInfo:
-        leaderInfo = getRandomReplica()
+        try:
+            leaderInfo = getRandomReplica()
+        except NoTargetFoundException as e:
+            if not target:
+                raise e
+
+            addNewReplicaToMembershipFile(target)
+            leaderInfo = target.split(':')
+            leaderInfo[1] = int(leaderInfo[1])
+            leaderInfo = tuple(leaderInfo)
 
     numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
     numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
@@ -209,16 +219,25 @@ def delKeyHelper(key, clientIdentifier, requestNumber):
 
     raise DelFailureException()
 
-def get(key, numPastMappings):
+def get(key, numPastMappings, target=""):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
 
-    return getHelper(key, hostIP, nextRequestIdentifier, numPastMappings)
+    return getHelper(key, hostIP, nextRequestIdentifier, numPastMappings, target)
 
-def getHelper(key, clientIdentifier, requestNumber, numPastMappings):
+def getHelper(key, clientIdentifier, requestNumber, numPastMappings, target):
     leaderInfo = getLeaderInfo()
     if not leaderInfo:
-        leaderInfo = getRandomReplica()
+        try:
+            leaderInfo = getRandomReplica()
+        except NoTargetFoundException as e:
+            if not target:
+                raise e
+
+            addNewReplicaToMembershipFile(target)
+            leaderInfo = target.split(':')
+            leaderInfo[1] = int(leaderInfo[1])
+            leaderInfo = tuple(leaderInfo)
 
     numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
     numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
@@ -438,7 +457,7 @@ def addNewReplicaToMembershipFile(newSocketAddr):
         with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r') as clusterMembershipFileObj:
             socketAddr = clusterMembershipFileObj.readline()
             while socketAddr:
-                currentMembership.add(socketAddr)
+                currentMembership.add(socketAddr.strip())
                 socketAddr = clusterMembershipFileObj.readline()
 
     currentMembership.add(newSocketAddr)
@@ -528,6 +547,7 @@ if __name__ == "__main__":
     getParser = subparsers.add_parser("get", help="Used to read value associated with a given key")
     getParser.add_argument("key", help="Key whose associated value will be retreived")
     getParser.add_argument("-rev", nargs="?", type=int, default=0)
+    getParser.add_argument("-target", default="", help="Socket address of the replica to send initial request to")
 
     delKeyParser = subparsers.add_parser("del", help="Used to remove a given key from the cluster")
     delKeyParser.add_argument("key", help="Key to be removed from the cluster")
@@ -550,10 +570,12 @@ if __name__ == "__main__":
             print("PUT request failed because no target could be found: Please specify -target in the command")
     elif args.command == "get":
         try:
-            for val in get(args.key, args.rev):
+            for val in get(args.key, args.rev, args.target):
                 print(val)
         except GetFailureException:
             print("GET Request Failed")
+        except NoTargetFoundException:
+            print("GET request failed because no target could be found: Please specify -target in the command")
     elif args.command == "del":
         print(delKey(args.key))
     elif args.command == "newconfig":
