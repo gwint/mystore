@@ -1077,7 +1077,16 @@ Replica::kill() {
 }
 
 void
-Replica::getInformation(std::map<std::string, std::string> & _return) {
+Replica::getInformationHelper(GetInformationHelperResponse & _return, const int32_t term) {
+    _return.success = true;
+
+    if(term < this->currentTerm) {
+        _return.success = false;
+        _return.term = this->currentTerm;
+
+        return;
+    }
+
     std::stringstream roleStream;
     std::stringstream termStream;
     std::stringstream indexStream;
@@ -1088,10 +1097,122 @@ Replica::getInformation(std::map<std::string, std::string> & _return) {
     indexStream << this->log.size();
     endpointStream << this->myID.hostname << ":" << this->myID.port;
 
-    _return["endpoint"] = endpointStream.str();
-    _return["role"] = roleStream.str();
-    _return["term"] = termStream.str();
-    _return["index"] = indexStream.str();
+    _return.replicaInformation["endpoint"] = endpointStream.str();
+    _return.replicaInformation["role"] = roleStream.str();
+    _return.replicaInformation["term"] = termStream.str();
+    _return.replicaInformation["index"] = indexStream.str();
+}
+
+void
+Replica::getInformation(GetInformationResponse& _return) {
+    this->lockHandler.acquireLocks(LockName::STATE_LOCK,
+                                   LockName::CURR_TERM_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                   LockName::LEADER_LOCK);
+
+    _return.success = true;
+
+    if(this->state != ReplicaState::LEADER) {
+        _return.success = false;
+        if(!Replica::isANullID(this->leader)) {
+            _return.leaderID = this->leader;
+        }
+
+        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                       LockName::CURR_TERM_LOCK,
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                       LockName::LEADER_LOCK);
+
+        return;
+    }
+
+    // Add leader information to _return
+    std::stringstream roleStream;
+    std::stringstream termStream;
+    std::stringstream indexStream;
+    std::stringstream endpointStream;
+
+    roleStream << this->state;
+    termStream << this->currentTerm;
+    indexStream << this->log.size();
+    endpointStream << this->myID.hostname << ":" << this->myID.port;
+
+    _return.clusterInformation[this->myID]["endpoint"] = endpointStream.str();
+    _return.clusterInformation[this->myID]["role"] = roleStream.str();
+    _return.clusterInformation[this->myID]["term"] = termStream.str();
+    _return.clusterInformation[this->myID]["index"] = indexStream.str();
+
+    for(const ID& id : this->clusterMembership) {
+        if(id == this->myID) {
+            continue;
+        }
+
+        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
+        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+        ReplicaServiceClient client(protocol);
+
+        try {
+            transport->open();
+        }
+        catch(TTransportException& e) {
+            #ifndef NDEBUG
+            msg.str("");
+            msg << "Error while opening a connection to get information from replica at " << id << ":" << e.getType();
+            this->logMsg(msg.str());
+            #endif
+
+            _return.clusterInformation[id]["endpoint"] = "N/A";
+            _return.clusterInformation[id]["role"] = "N/A";
+            _return.clusterInformation[id]["term"] = "N/A";
+            _return.clusterInformation[id]["index"] = "N/A";
+
+            continue;
+        }
+
+        try {
+            #ifndef NDEBUG
+            msg.str("");
+            msg << "Now sending a getInformationHelper request to " << id << "; may take a while...";
+            this->logMsg(msg.str());
+            #endif
+
+            GetInformationHelperResponse getInformationHelperResponse;
+            client.getInformationHelper(getInformationHelperResponse, this->currentTerm);
+
+            if(getInformationHelperResponse.term > this->currentTerm) {
+                this->currentTerm = getInformationHelperResponse.term;
+                this->state = ReplicaState::FOLLOWER;
+                this->votedFor = Replica::getNullID();
+                _return.success = false;
+
+                this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                               LockName::LEADER_LOCK,
+                                               LockName::CURR_TERM_LOCK,
+                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
+
+                return;
+            }
+
+            assert(getInformationHelperResponse.success);
+
+            _return.clusterInformation[id] = getInformationHelperResponse.replicaInformation;
+        }
+        catch(TTransportException& e) {
+            _return.clusterInformation[id]["endpoint"] = "N/A";
+            _return.clusterInformation[id]["role"] = "N/A";
+            _return.clusterInformation[id]["term"] = "N/A";
+            _return.clusterInformation[id]["index"] = "N/A";
+        }
+    }
+
+    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
+                                   LockName::CURR_TERM_LOCK,
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                   LockName::LEADER_LOCK);
 }
 
 void
