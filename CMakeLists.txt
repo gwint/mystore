@@ -42,7 +42,6 @@ add_custom_command(
     OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
            ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
-           ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
     COMMAND thrift -r --gen cpp ${CMAKE_CURRENT_SOURCE_DIR}/thriftfile/src/thrift-file/replicaservice.thrift
     COMMAND thrift -r --gen py ${CMAKE_CURRENT_SOURCE_DIR}/thriftfile/src/thrift-file/replicaservice.thrift
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/thriftfile/src/thrift-file/replicaservice.thrift
@@ -56,7 +55,6 @@ add_executable(MyStore
 add_library(ThriftFileCompilation
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/ReplicaService.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_types.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp/replicaservice_constants.cpp
 )
 
 add_dependencies(ThriftFileCompilation thrift-file)
