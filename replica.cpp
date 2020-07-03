@@ -69,7 +69,7 @@ Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocke
                                                                                           clusterMembership(Replica::getMemberIDs(clusterSocketAddrs)),
                                                                                           lockHandler(16),
                                                                                           noopIndex(0),
-											  willingToVote(false) {
+											  willingToVote(true) {
 
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
@@ -110,7 +110,8 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
                                    LockName::LOG_LOCK,
                                    LockName::STATE_LOCK,
                                    LockName::VOTED_FOR_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::WILLING_TO_VOTE_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -130,7 +131,7 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
                 this->isAtLeastAsUpToDateAs(lastLogIndex,
                                             lastLogTerm,
                                             this->log.size()-1,
-                                            this->log.back().term)) {
+                                            this->log.back().term) && this->willingToVote) {
         #ifndef NDEBUG
         msg.str("");
         msg << "Granted vote to " << candidateID;
@@ -145,7 +146,8 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
                                    LockName::LOG_LOCK,
                                    LockName::STATE_LOCK,
                                    LockName::VOTED_FOR_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+                                   LockName::SNAPSHOT_LOCK,
+                                   LockName::WILLING_TO_VOTE_LOCK);
 
     _return.voteGranted = voteGranted;
     _return.term = ballotTerm;
@@ -165,7 +167,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::TIMER_LOCK,
                                    LockName::COMMIT_INDEX_LOCK,
                                    LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                   LockName::WILLING_TO_VOTE_LOCK);
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -175,6 +178,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
     if(term >= this->currentTerm) {
         this->timeLeft = this->timeout;
+	this->willingToVote = false;
     }
 
     assert(prevLogIndex >= 0);
@@ -202,7 +206,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                        LockName::TIMER_LOCK,
                                        LockName::COMMIT_INDEX_LOCK,
                                        LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                       LockName::WILLING_TO_VOTE_LOCK);
 
         return;
     }
@@ -293,7 +298,8 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                    LockName::TIMER_LOCK,
                                    LockName::COMMIT_INDEX_LOCK,
                                    LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                   LockName::WILLING_TO_VOTE_LOCK);
 }
 
 void
@@ -1220,6 +1226,8 @@ void
 Replica::timer() {
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
+    unsigned int minTimeoutMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+    
     std::stringstream msg;
 
     while(true) {
@@ -1233,7 +1241,8 @@ Replica::timer() {
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
                                        LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                       LockName::WILLING_TO_VOTE_LOCK);
 
         if(this->state == ReplicaState::LEADER) {
             this->lockHandler.releaseLocks(LockName::STATE_LOCK,
@@ -1246,7 +1255,8 @@ Replica::timer() {
                                            LockName::NEXT_INDEX_LOCK,
                                            LockName::MATCH_INDEX_LOCK,
                                            LockName::SNAPSHOT_LOCK,
-                                           LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                           LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                           LockName::WILLING_TO_VOTE_LOCK);
 
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             continue;
@@ -1435,6 +1445,10 @@ Replica::timer() {
         }
         --this->timeLeft;
 
+	if((unsigned) this->timeout - this->timeLeft == minTimeoutMS) {
+	    this->willingToVote = true;
+	} 
+
         this->lockHandler.releaseLocks(LockName::STATE_LOCK,
                                        LockName::LOG_LOCK,
                                        LockName::CURR_TERM_LOCK,
@@ -1445,7 +1459,8 @@ Replica::timer() {
                                        LockName::NEXT_INDEX_LOCK,
                                        LockName::MATCH_INDEX_LOCK,
                                        LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                       LockName::WILLING_TO_VOTE_LOCK);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
