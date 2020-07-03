@@ -65,6 +65,7 @@ class Replica : virtual public ReplicaServiceIf {
         std::thread heartbeatSenderThr;
         std::thread retryThr;
         Snapshot currentSnapshot;
+	bool willingToVote;
 
         static Entry getEmptyLogEntry();
         static unsigned int getElectionTimeout();

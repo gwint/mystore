@@ -67,8 +67,9 @@ Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocke
                                                                                           currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                                                                           hasOperationStarted(false),
                                                                                           clusterMembership(Replica::getMemberIDs(clusterSocketAddrs)),
-                                                                                          lockHandler(15),
-                                                                                          noopIndex(0) {
+                                                                                          lockHandler(16),
+                                                                                          noopIndex(0),
+											  willingToVote(false) {
 
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
