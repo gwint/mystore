@@ -46,18 +46,3 @@ Notice that the -target option is used on the call to put: this is because the m
 cluster members.  Instead it builds up an understanding of the cluster over time as it interacts with it.  As as a result, the first command
 run using the mystore command line tool must specify a socket address to use as the target for the command.  Subsequent command do not require use
 of the target option.
-                 
-
-
-
-D
-D
-D
-C
-lkjsdfjlksdj
-A
-B
-B
-B
-B
-Notice 
