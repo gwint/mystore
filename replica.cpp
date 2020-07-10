@@ -1971,6 +1971,8 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
         }
     }
 
+    this->nonVotingMembers = newConfigurationEntry.nonVotingMembers;
+
     this->log.push_back(newConfigurationEntry);
 
     int replicationAmount = 0;
