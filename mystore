@@ -170,9 +170,9 @@ def displayClusterInfoWithCommaSep(clusterInfo):
     count = 0
     for endpoint, replicaInformation in clusterInfo.items():
         if replicaInformation:
-            print(f'{endpoint[0]},{endpoint[1]},{replicaInformation["role"]},{replicaInformation["term"]},{replicaInformation["index"]}', end='')
+            print(f'{endpoint.hostname},{endpoint.port},{replicaInformation["role"]},{replicaInformation["term"]},{replicaInformation["index"]}', end='')
         else:
-            print(f'{endpoint[0]},{endpoint[1]},None', end='')
+            print(f'{endpoint.hostname},{endpoint.port},None', end='')
 
         if count < len(clusterInfo)-1:
             print(';', end='')
