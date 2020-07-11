@@ -7,7 +7,7 @@ set(CMAKE_CXX_FLAGS "-Wall -pedantic -g -O3")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-set(ServerFiles replica.cpp lockhandler.cpp)
+set(ServerFiles driver.cpp)
 set(TestFiles tests/test_replica.cpp)
 set(HelperFiles replica.cpp lockhandler.cpp)
 
@@ -100,19 +100,15 @@ add_library(HelperFiles
 )
 
 add_dependencies(ThriftFileCompilation thrift-file)
-add_dependencies(MyStore ThriftFileCompilation)
-add_dependencies(MyStore spdlog)
-add_dependencies(MyStore cpp-dotenv)
-add_dependencies(MyStore argparse)
 
-add_dependencies(MyStoreTests ThriftFileCompilation)
-add_dependencies(MyStoreTests spdlog)
-add_dependencies(MyStoreTests cpp-dotenv)
-add_dependencies(MyStoreTests argparse)
-
+add_dependencies(HelperFiles ThriftFileCompilation)
 add_dependencies(HelperFiles spdlog)
 add_dependencies(HelperFiles cpp-dotenv)
-add_dependencies(HelperFiles argparse)
+add_dependencies(HelperFiles argparse) 
+
+add_dependencies(MyStore HelperFiles)
+
+add_dependencies(MyStoreTests HelperFiles)
 
 target_include_directories(MyStore PRIVATE gen-cpp/)
 target_include_directories(MyStore PRIVATE spdlog/src/spdlog/include/)
@@ -125,13 +121,11 @@ target_include_directories(HelperFiles PRIVATE argparse/src/argparse/)
 
 target_include_directories(MyStoreTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/)
 
-target_link_libraries(MyStore thrift)
-target_link_libraries(MyStore pthread)
-target_link_libraries(MyStore ThriftFileCompilation)
+target_link_libraries(HelperFiles thrift)
+target_link_libraries(HelperFiles pthread)
+target_link_libraries(HelperFiles ThriftFileCompilation)
+
+target_link_libraries(MyStore HelperFiles)
 
 target_link_libraries(MyStoreTests gtest_main)
-target_link_libraries(MyStoreTests thrift)
-target_link_libraries(MyStoreTests pthread)
-target_link_libraries(MyStoreTests ThriftFileCompilation)
-
 target_link_libraries(MyStoreTests HelperFiles)

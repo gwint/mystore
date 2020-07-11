@@ -2272,26 +2272,100 @@ ID::operator<(const ID& other) const {
     return id1.str() < id2.str();
 }
 
-int
-main(int argc, const char** argv) {
-    ArgumentParser parser;
+std::ostream&
+operator<<(std::ostream& os, const std::unordered_map<std::string, std::vector<std::string>>& stateMachine) {
+    os << "[";
+    unsigned int count = 0;
+    for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
+        os << it->first << "=>" << it->second.back();
+        if(count < stateMachine.size()-1) {
+            os << ", ";
+        }
+        ++count;
+    }
+    os << "]";
 
-    parser.addArgument("--listeningport", 1, false);
-    parser.addArgument("--clustermembership", '+', false);
+    return os;
+}
 
-    parser.parse(argc, argv);
+std::ostream&
+operator<<(std::ostream& os, const std::vector<Entry>& log) {
+    os << "[";
+    for(unsigned int i = 0; i < log.size(); ++i) {
+        os << log[i];
 
-    unsigned int portToUse = atoi(parser.retrieve<std::string>("listeningport").c_str());
-    std::vector<std::string> clusterMembers = parser.retrieve<std::vector<std::string>>("clustermembership");
+        if(i < log.size()-1) {
+            os << ", ";
+        }
+    }
+    os << "]";
 
-    std::shared_ptr<Replica> handler(new Replica(portToUse, clusterMembers));
-    std::shared_ptr<apache::thrift::TProcessor> processor(new ReplicaServiceProcessor(handler));
-    std::shared_ptr<apache::thrift::transport::TServerTransport> serverTransport(new apache::thrift::transport::TServerSocket(portToUse));
-    std::shared_ptr<apache::thrift::transport::TTransportFactory> transportFactory(new apache::thrift::transport::TBufferedTransportFactory());
-    std::shared_ptr<apache::thrift::protocol::TProtocolFactory> protocolFactory(new apache::thrift::protocol::TBinaryProtocolFactory());
+    return os;
+}
 
-    apache::thrift::server::TThreadedServer server(processor, serverTransport, transportFactory, protocolFactory);
-    server.serve();
+std::ostream&
+operator<<(std::ostream& os, const ReplicaState& state) {
+    switch(state) {
+        case ReplicaState::LEADER:
+            os << "LEADER";
+            break;
+        case ReplicaState::CANDIDATE:
+            os << "CANDIDATE";
+            break;
+        case ReplicaState::FOLLOWER:
+            os << "FOLLOWER";
+            break;
+    };
 
-    return 0;
+    return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const Snapshot& snapshot) {
+    os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
+
+    for(auto const& mapping : snapshot.mappings) {
+        os << mapping.first << '\n' << mapping.second.back() << '\n';
+    }
+
+    return os;
+}
+
+std::istream&
+operator>>(std::istream& is, Snapshot& snapshot) {
+    int lastIncludedIndex,
+        lastIncludedTerm;
+
+    is >> lastIncludedIndex >> lastIncludedTerm;
+
+    snapshot.lastIncludedIndex = lastIncludedIndex;
+    snapshot.lastIncludedTerm = lastIncludedTerm;
+
+    /*
+    while(is) {
+        std::string key, value;
+        is >> key >> value;
+
+        std::stack<std::string>> valueStack;
+        valueStack.push(value);
+
+        snapshot.mappings.push_back({key, value});
+    }
+    */
+
+    return is;
+}
+
+std::ostream&
+operator<<(std::ostream& os, std::vector<std::pair<std::string, std::string>>& mappings) {
+    os << "[";
+    for(unsigned int i = 0; i < mappings.size(); ++i) {
+        os << mappings[i].first << "=>" << mappings[i].second;
+        if(i < mappings.size()-1) {
+            os << ", ";
+        }
+    }
+    os << "]";
+
+    return os;
 }

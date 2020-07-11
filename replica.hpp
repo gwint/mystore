@@ -113,101 +113,21 @@ class Replica : virtual public ReplicaServiceIf {
 };
 
 std::ostream&
-operator<<(std::ostream& os, const std::unordered_map<std::string, std::vector<std::string>>& stateMachine) {
-    os << "[";
-    unsigned int count = 0;
-    for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
-        os << it->first << "=>" << it->second.back();
-        if(count < stateMachine.size()-1) {
-            os << ", ";
-        }
-        ++count;
-    }
-    os << "]";
-
-    return os;
-}
+operator<<(std::ostream&, const std::unordered_map<std::string, std::vector<std::string>>&);
 
 std::ostream&
-operator<<(std::ostream& os, const std::vector<Entry>& log) {
-    os << "[";
-    for(unsigned int i = 0; i < log.size(); ++i) {
-        os << log[i];
-
-        if(i < log.size()-1) {
-            os << ", ";
-        }
-    }
-    os << "]";
-
-    return os;
-}
+operator<<(std::ostream&, const std::vector<Entry>&);
 
 std::ostream&
-operator<<(std::ostream& os, const ReplicaState& state) {
-    switch(state) {
-        case ReplicaState::LEADER:
-            os << "LEADER";
-            break;
-        case ReplicaState::CANDIDATE:
-            os << "CANDIDATE";
-            break;
-        case ReplicaState::FOLLOWER:
-            os << "FOLLOWER";
-            break;
-    };
-
-    return os;
-}
+operator<<(std::ostream&, const ReplicaState&);
 
 std::ostream&
-operator<<(std::ostream& os, const Snapshot& snapshot) {
-    os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
-
-    for(auto const& mapping : snapshot.mappings) {
-        os << mapping.first << '\n' << mapping.second.back() << '\n';
-    }
-
-    return os;
-}
+operator<<(std::ostream&, const Snapshot&);
 
 std::istream&
-operator>>(std::istream& is, Snapshot& snapshot) {
-    int lastIncludedIndex,
-        lastIncludedTerm;
-
-    is >> lastIncludedIndex >> lastIncludedTerm;
-
-    snapshot.lastIncludedIndex = lastIncludedIndex;
-    snapshot.lastIncludedTerm = lastIncludedTerm;
-
-    /*
-    while(is) {
-        std::string key, value;
-        is >> key >> value;
-
-        std::stack<std::string>> valueStack;
-        valueStack.push(value);
-
-        snapshot.mappings.push_back({key, value});
-    }
-    */
-
-    return is;
-}
+operator>>(std::istream&, Snapshot&);
 
 std::ostream&
-operator<<(std::ostream& os, std::vector<std::pair<std::string, std::string>>& mappings) {
-    os << "[";
-    for(unsigned int i = 0; i < mappings.size(); ++i) {
-        os << mappings[i].first << "=>" << mappings[i].second;
-        if(i < mappings.size()-1) {
-            os << ", ";
-        }
-    }
-    os << "]";
-
-    return os;
-}
+operator<<(std::ostream&, std::vector<std::pair<std::string, std::string>>&);
 
 #endif
