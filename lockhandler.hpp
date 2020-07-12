@@ -13,7 +13,7 @@ class LockHandler {
         pthread_mutex_t* locks;
 
     public:
-        LockHandler(unsigned int);
+        LockHandler(int);
         ~LockHandler();
         template <typename T, typename... Types> void acquireLocks(T, Types...);
         template <typename T, typename... Types> void releaseLocks(T, Types...);

@@ -10,6 +10,7 @@
 #include <cassert>
 #include <fstream>
 #include <unordered_set>
+#include <stdexcept>
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
