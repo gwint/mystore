@@ -22,3 +22,8 @@ LockHandler::LockHandler(int numLocksIn) : numLocks(numLocksIn) {
 LockHandler::~LockHandler() {
     delete[] this->locks;
 }
+
+int
+LockHandler::getNumLocks() {
+    return this->numLocks;
+}

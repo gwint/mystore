@@ -9,7 +9,7 @@
 
 class LockHandler {
     private:
-        unsigned int numLocks;
+        int numLocks;
         pthread_mutex_t* locks;
 
     public:
@@ -21,6 +21,7 @@ class LockHandler {
         void unlockAll();
         template <typename T> static void collect(std::vector<T>&, T);
         template <typename T, typename ... Ts> static void collect(std::vector<T>&, T, Ts...);
+        int getNumLocks();
 };
 
 template <typename T, typename... Types>
