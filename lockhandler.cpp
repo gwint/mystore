@@ -27,3 +27,8 @@ int
 LockHandler::getNumLocks() {
     return this->numLocks;
 }
+
+pthread_mutex_t*
+LockHandler::getLocks() {
+    return this->locks;
+}

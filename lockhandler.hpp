@@ -22,6 +22,7 @@ class LockHandler {
         template <typename T> static void collect(std::vector<T>&, T);
         template <typename T, typename ... Ts> static void collect(std::vector<T>&, T, Ts...);
         int getNumLocks();
+        pthread_mutex_t* getLocks();
 };
 
 template <typename T, typename... Types>
