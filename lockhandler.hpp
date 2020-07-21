@@ -9,20 +9,17 @@
 
 class LockHandler {
     private:
-        int numLocks;
-        pthread_mutex_t* locks;
+        std::vector<pthread_mutex_t> mutexes;
 
     public:
         LockHandler(int);
-        ~LockHandler();
         template <typename T, typename... Types> void acquireLocks(T, Types...);
         template <typename T, typename... Types> void releaseLocks(T, Types...);
         void lockAll();
         void unlockAll();
         template <typename T> static void collect(std::vector<T>&, T);
         template <typename T, typename ... Ts> static void collect(std::vector<T>&, T, Ts...);
-        int getNumLocks();
-        pthread_mutex_t* getLocks();
+        std::vector<pthread_mutex_t>& getLocks();
 };
 
 template <typename T, typename... Types>
@@ -34,7 +31,7 @@ LockHandler::acquireLocks(T lock, Types... rest) {
     std::sort(locksToAcquire.begin(), locksToAcquire.end());
 
     for(LockName lockName : locksToAcquire) {
-        pthread_mutex_lock(&this->locks[lockName]);
+        pthread_mutex_lock(&this->mutexes[lockName]);
     }
 }
 
@@ -48,7 +45,7 @@ LockHandler::releaseLocks(T lock, Types... rest) {
     std::reverse(locksToRelease.begin(), locksToRelease.end());
 
     for(LockName lockName : locksToRelease) {
-        pthread_mutex_unlock(&this->locks[lockName]);
+        pthread_mutex_unlock(&this->mutexes[lockName]);
     }
 }
 
