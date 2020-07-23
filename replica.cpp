@@ -2356,17 +2356,3 @@ operator>>(std::istream& is, Snapshot& snapshot) {
 
     return is;
 }
-
-std::ostream&
-operator<<(std::ostream& os, std::vector<std::pair<std::string, std::string>>& mappings) {
-    os << "[";
-    for(unsigned int i = 0; i < mappings.size(); ++i) {
-        os << mappings[i].first << "=>" << mappings[i].second;
-        if(i < mappings.size()-1) {
-            os << ", ";
-        }
-    }
-    os << "]";
-
-    return os;
-}

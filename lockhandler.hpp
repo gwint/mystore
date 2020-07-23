@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <vector>
 #include <algorithm>
+#include <initializer_list>
 
 #include "locknames.hpp"
 
@@ -15,8 +16,6 @@ class LockHandler {
         LockHandler(int);
         template <typename T, typename... Types> void acquireLocks(T, Types...);
         template <typename T, typename... Types> void releaseLocks(T, Types...);
-        void lockAll();
-        void unlockAll();
         template <typename T> static void collect(std::vector<T>&, T);
         template <typename T, typename ... Ts> static void collect(std::vector<T>&, T, Ts...);
         std::vector<pthread_mutex_t>& getLocks();

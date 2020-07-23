@@ -127,7 +127,4 @@ operator<<(std::ostream&, const Snapshot&);
 std::istream&
 operator>>(std::istream&, Snapshot&);
 
-std::ostream&
-operator<<(std::ostream&, std::vector<std::pair<std::string, std::string>>&);
-
 #endif
