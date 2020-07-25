@@ -27,7 +27,7 @@ TEST(LockHandlerTests, ConfirmNegativeLockCountsNotAllowedTest) {
 TEST(LockHandlerTests, AcquireSingleLockTest) {
     LockHandler lockhandler(5);
     std::vector<pthread_mutex_t>& locks = lockhandler.getLocks();
-    lockhandler.acquireLocks(LockName::CURR_TERM_LOCK);
+    lockhandler.acquireLocks({LockName::CURR_TERM_LOCK});
 
     ASSERT_NE(0, pthread_mutex_trylock(&locks[1]));
 }
@@ -35,7 +35,7 @@ TEST(LockHandlerTests, AcquireSingleLockTest) {
 TEST(LockHandlerTests, AcquireMultipleLockTest) {
     LockHandler lockhandler(5);
     std::vector<pthread_mutex_t>& locks = lockhandler.getLocks();
-    lockhandler.acquireLocks(LockName::CURR_TERM_LOCK, LockName::COMMIT_INDEX_LOCK);
+    lockhandler.acquireLocks({LockName::CURR_TERM_LOCK, LockName::COMMIT_INDEX_LOCK});
 
     ASSERT_NE(0, pthread_mutex_trylock(&locks[1]));
     ASSERT_NE(0, pthread_mutex_trylock(&locks[3]));
@@ -45,11 +45,11 @@ TEST(LockHandlerTests, ReleaseSingleLockTest) {
     
     LockHandler lockhandler(5);
     std::vector<pthread_mutex_t>& locks = lockhandler.getLocks();
-    lockhandler.acquireLocks(LockName::CURR_TERM_LOCK);
+    lockhandler.acquireLocks({LockName::CURR_TERM_LOCK});
 
     ASSERT_NE(0, pthread_mutex_trylock(&locks[1]));
 
-    lockhandler.releaseLocks(LockName::CURR_TERM_LOCK);
+    lockhandler.releaseLocks({LockName::CURR_TERM_LOCK});
 
     locks = lockhandler.getLocks();
 
@@ -60,12 +60,12 @@ TEST(LockHandlerTests, ReleaseMultipleLockTest) {
     
     LockHandler lockhandler(5);
     std::vector<pthread_mutex_t>& locks = lockhandler.getLocks();
-    lockhandler.acquireLocks(LockName::CURR_TERM_LOCK, LockName::COMMIT_INDEX_LOCK);
+    lockhandler.acquireLocks({LockName::CURR_TERM_LOCK, LockName::COMMIT_INDEX_LOCK});
 
     ASSERT_NE(0, pthread_mutex_trylock(&locks[1]));
     ASSERT_NE(0, pthread_mutex_trylock(&locks[3]));
 
-    lockhandler.releaseLocks(LockName::CURR_TERM_LOCK, LockName::COMMIT_INDEX_LOCK);
+    lockhandler.releaseLocks({LockName::CURR_TERM_LOCK, LockName::COMMIT_INDEX_LOCK});
 
     locks = lockhandler.getLocks();
 
@@ -125,7 +125,24 @@ TEST(OperatorTests, StateMachineCoutOperatorTest) {
 }
 
 TEST(OperatorTests, LogCoutOperatorTest) {
-    ASSERT_EQ(0, 1);
+
+    std::streambuf* oldCoutStreamBuf = std::cout.rdbuf();
+    std::ostringstream strCout;
+    std::cout.rdbuf(strCout.rdbuf());
+
+    std::vector<Entry> log;
+    Entry entry1;
+    entry1.type = EntryType::EMPTY_ENTRY;
+    log.push_back(entry1);
+    
+    std::cout << log;
+
+    std::string expectedOutput = "[Entry(type=EMPTY_ENTRY, key=, value=, term=0, clientIdentifier=, requestIdentifier=0, newConfiguration=[], nonVotingMembers={})]";
+    std::string capturedStr = strCout.str();
+
+    ASSERT_EQ(expectedOutput, capturedStr);
+
+    std::cout.rdbuf(oldCoutStreamBuf);
 }
 
 int
