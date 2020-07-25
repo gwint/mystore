@@ -7,6 +7,8 @@
 #include <queue>
 #include <stack>
 #include <thread>
+#include <functional>
+#include <sstream>
 
 #include "lockhandler.hpp"
 
@@ -37,6 +39,15 @@ enum ReplicaState {
     CANDIDATE
 };
 
+struct IDHasher {
+    size_t operator()(const ID& id) const {
+        std::stringstream ss;
+        ss << id;
+
+        return std::hash<std::string>()(ss.str());
+    }
+};
+
 class Replica : virtual public ReplicaServiceIf {
     private:
         ReplicaState state;
@@ -44,7 +55,7 @@ class Replica : virtual public ReplicaServiceIf {
         int commitIndex;
         int lastApplied;
         std::vector<Entry> log;
-        std::map<ID, int> nextIndex;
+        std::unordered_map<ID, int, IDHasher> nextIndex;
         std::map<ID, int> matchIndex;
         int timeout;
         int timeLeft;
@@ -128,3 +139,4 @@ std::istream&
 operator>>(std::istream&, Snapshot&);
 
 #endif
+
