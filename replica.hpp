@@ -44,7 +44,7 @@ struct IDHasher {
         std::stringstream ss;
         ss << id;
 
-        return std::hash<std::string>()(ss.str());
+        return std::hash<std::string>{}(ss.str());
     }
 };
 
@@ -56,7 +56,7 @@ class Replica : virtual public ReplicaServiceIf {
         int lastApplied;
         std::vector<Entry> log;
         std::unordered_map<ID, int, IDHasher> nextIndex;
-        std::map<ID, int> matchIndex;
+        std::unordered_map<ID, int, IDHasher> matchIndex;
         int timeout;
         int timeLeft;
         int heartbeatTick;
@@ -78,12 +78,6 @@ class Replica : virtual public ReplicaServiceIf {
         Snapshot currentSnapshot;
 	bool willingToVote;
 
-        static Entry getEmptyLogEntry();
-        static unsigned int getElectionTimeout();
-        static std::vector<ID> getMemberIDs(const std::vector<std::string>&);
-        static ID getNullID();
-        static bool isANullID(const ID&);
-
         bool isAtLeastAsUpToDateAs(unsigned int,
                                    unsigned int,
                                    unsigned int,
@@ -94,15 +88,6 @@ class Replica : virtual public ReplicaServiceIf {
         void logMsg(std::string);
 
         Snapshot getSnapshot();
-
-        static const char* MIN_ELECTION_TIMEOUT_ENV_VAR_NAME;
-        static const char* MAX_ELECTION_TIMEOUT_ENV_VAR_NAME;
-        static const char* CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME;
-        static const char* HEARTBEAT_TICK_ENV_VAR_NAME;
-        static const char* RPC_TIMEOUT_ENV_VAR_NAME;
-        static const char* RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME;
-        static const char* SNAPSHOT_FILE_ENV_VAR_NAME;
-        static const char* MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME;
 
     public:
         Replica(unsigned int, const std::vector<std::string>&);

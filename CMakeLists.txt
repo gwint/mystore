@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(ServerFiles driver.cpp)
 set(TestFiles tests/test_replica.cpp)
-set(HelperFiles replica.cpp lockhandler.cpp)
+set(HelperFiles replica.cpp lockhandler.cpp utils.cpp constants.cpp)
 
 configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
 
@@ -45,7 +45,7 @@ endif()
 
 ExternalProject_Add(cpp-dotenv
     PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/cpp-dotenv
-    GIT_REPOSITORY https://github.com/adeharo9/cpp-dotenv.git
+    GIT_REPOSITORY https://github.com/gwint/cpp-dotenv.git
     INSTALL_COMMAND ""
 )
 

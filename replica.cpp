@@ -15,6 +15,7 @@
 #include "replica.hpp"
 #include "lockhandler.hpp"
 #include "locknames.hpp"
+#include "utils.hpp"
 
 #include "dotenv.h"
 #include "spdlog/spdlog.h"
@@ -49,33 +50,24 @@ areAMajorityGreaterThanOrEqual(std::vector<int> numLst, int num) {
     return numGreaterThanOrEqual >= numForMajority;
 }
 
-const char* Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS";
-const char* Replica::MAX_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MAX_MS";
-const char* Replica::CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE";
-const char* Replica::HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS";
-const char* Replica::RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS";
-const char* Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT";
-const char* Replica::SNAPSHOT_FILE_ENV_VAR_NAME = "SNAPSHOT_FILE";
-const char* Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME = "MAX_ALLOWED_LOG_SIZE";
-
 Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocketAddrs) : state(ReplicaState::FOLLOWER),
                                                                                           currentTerm(0),
                                                                                           commitIndex(0),
                                                                                           lastApplied(0),
-                                                                                          timeout(Replica::getElectionTimeout()),
-                                                                                          votedFor(Replica::getNullID()),
-                                                                                          leader(Replica::getNullID()),
+                                                                                          timeout(getElectionTimeout()),
+                                                                                          votedFor(getNullID()),
+                                                                                          leader(getNullID()),
                                                                                           currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                                                                           hasOperationStarted(false),
-                                                                                          clusterMembership(Replica::getMemberIDs(clusterSocketAddrs)),
+                                                                                          clusterMembership(getMemberIDs(clusterSocketAddrs)),
                                                                                           lockHandler(16),
                                                                                           noopIndex(0),
 											  willingToVote(true) {
 
     this->timeLeft = this->timeout;
-    this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
+    this->heartbeatTick = atoi(dotenv::env[HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
 
-    this->log.push_back(Replica::getEmptyLogEntry());
+    this->log.push_back(getEmptyLogEntry());
 
     char hostBuffer[256];
     gethostname(hostBuffer, sizeof(hostBuffer));
@@ -123,12 +115,12 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
     if(term > this->currentTerm) {
         this->state = ReplicaState::FOLLOWER;
         this->currentTerm = term;
-        this->votedFor = Replica::getNullID();
+        this->votedFor = getNullID();
     }
 
     ballotTerm = this->currentTerm;
 
-    if((this->votedFor == candidateID || Replica::isANullID(this->votedFor)) &&
+    if((this->votedFor == candidateID || isANullID(this->votedFor)) &&
                 this->isAtLeastAsUpToDateAs(lastLogIndex,
                                             lastLogTerm,
                                             this->log.size()-1,
@@ -332,8 +324,8 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         #endif
 
         _return.success = false;
-        _return.leaderID = Replica::getNullID();
-        if(!Replica::isANullID(this->leader)) {
+        _return.leaderID = getNullID();
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
@@ -359,9 +351,9 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -383,7 +375,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    this->myID,
                                    this->log.size()-1,
                                    this->log.back().term,
-                                   Replica::getEmptyLogEntry(),
+                                   getEmptyLogEntry(),
                                    this->commitIndex);
 
                 #ifndef NDEBUG
@@ -395,7 +387,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                 if(appendEntryResponse.term > this->currentTerm) {
                     this->state = ReplicaState::FOLLOWER;
                     this->currentTerm = appendEntryResponse.term;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                     _return.success = false;
 
                     #ifndef NDEBUG
@@ -558,7 +550,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         #endif
 
         _return.success = false;
-        if(!Replica::isANullID(this->leader)) {
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
@@ -655,9 +647,9 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -693,7 +685,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
             if(appendEntryResponse.term > this->currentTerm) {
                 this->currentTerm = appendEntryResponse.term;
                 this->state = ReplicaState::FOLLOWER;
-                this->votedFor = Replica::getNullID();
+                this->votedFor = getNullID();
                 _return.success = false;
 
                 this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -826,7 +818,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         #endif
 
         _return.success = false;
-        if(!Replica::isANullID(this->leader)) {
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
@@ -924,9 +916,9 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -962,7 +954,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
             if(appendEntryResponse.term > this->currentTerm) {
                 this->currentTerm = appendEntryResponse.term;
                 this->state = ReplicaState::FOLLOWER;
-                this->votedFor = Replica::getNullID();
+                this->votedFor = getNullID();
                 _return.success = false;
 
                 this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -1122,7 +1114,7 @@ Replica::getInformation(GetInformationResponse& _return) {
 
     if(this->state != ReplicaState::LEADER) {
         _return.success = false;
-        if(!Replica::isANullID(this->leader)) {
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
@@ -1156,9 +1148,9 @@ Replica::getInformation(GetInformationResponse& _return) {
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -1194,7 +1186,7 @@ Replica::getInformation(GetInformationResponse& _return) {
             if(getInformationHelperResponse.term > this->currentTerm) {
                 this->currentTerm = getInformationHelperResponse.term;
                 this->state = ReplicaState::FOLLOWER;
-                this->votedFor = Replica::getNullID();
+                this->votedFor = getNullID();
                 _return.success = false;
 
                 this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -1227,7 +1219,7 @@ void
 Replica::timer() {
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-    unsigned int minTimeoutMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+    unsigned int minTimeoutMS = atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
     
     std::stringstream msg;
 
@@ -1287,9 +1279,9 @@ Replica::timer() {
                 #endif
 
                 std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-                socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
                 std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
                 std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
                 ReplicaServiceClient client(protocol);
@@ -1362,9 +1354,9 @@ Replica::timer() {
                         this->matchIndex[id] = 0;
 
                         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-                        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
                         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
                         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
                         ReplicaServiceClient client(protocol);
@@ -1386,7 +1378,7 @@ Replica::timer() {
                                 if(appendEntryResponse.term > this->currentTerm) {
                                     this->state = ReplicaState::FOLLOWER;
                                     this->currentTerm = appendEntryResponse.term;
-                                    this->votedFor = Replica::getNullID();
+                                    this->votedFor = getNullID();
                                 }
 
                                 if(!appendEntryResponse.success) {
@@ -1541,15 +1533,15 @@ Replica::heartbeatSender() {
             }
 
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
 
             std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
             std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
             ReplicaServiceClient client(protocol);
 
-            Entry entryToSend = Replica::getEmptyLogEntry();
+            Entry entryToSend = getEmptyLogEntry();
             entryToSend.type = EntryType::EMPTY_ENTRY;
             unsigned int prevLogIndex = this->log.size()-1;
             unsigned int prevLogTerm = this->log.back().term;
@@ -1576,7 +1568,7 @@ Replica::heartbeatSender() {
                     if(appendEntryResponse.term > this->currentTerm) {
                         this->state = ReplicaState::FOLLOWER;
                         this->currentTerm = appendEntryResponse.term;
-                        this->votedFor = Replica::getNullID();
+                        this->votedFor = getNullID();
                         break;
                     }
 
@@ -1649,7 +1641,7 @@ Replica::heartbeatSender() {
 
 void
 Replica::retryRequest() {
-    unsigned int maxTimeToSpendRetryingMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+    unsigned int maxTimeToSpendRetryingMS = atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
 
     std::stringstream msg;
 
@@ -1662,7 +1654,7 @@ Replica::retryRequest() {
         this->jobsToRetry.pop();
 
         unsigned int timeSpentOnCurrentRetryMS = 0;
-        unsigned int timeoutMS = atoi(dotenv::env[Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME].c_str());
+        unsigned int timeoutMS = atoi(dotenv::env[RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME].c_str());
 
         while(timeSpentOnCurrentRetryMS < (0.8 * maxTimeToSpendRetryingMS)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeoutMS));
@@ -1707,9 +1699,9 @@ Replica::retryRequest() {
             targetID.port = job.targetPort;
 
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(targetID.hostname, targetID.port));
-            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
 
             std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
             std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
@@ -1739,7 +1731,7 @@ Replica::retryRequest() {
                 if(appendEntryResponse.term > this->currentTerm) {
                     this->currentTerm = appendEntryResponse.term;
                     this->state = ReplicaState::FOLLOWER;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                     std::queue<Job> empty;
                     std::swap(this->jobsToRetry, empty);
 
@@ -1838,7 +1830,7 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     this->timeLeft = this->timeout;
 
     std::stringstream compactionFileNameStream;
-    compactionFileNameStream << dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME] << "-" << this->myID.hostname << ":" << this->myID.port;
+    compactionFileNameStream << dotenv::env[SNAPSHOT_FILE_ENV_VAR_NAME] << "-" << this->myID.hostname << ":" << this->myID.port;
     std::string compactionFileName = compactionFileNameStream.str();
 
     std::ofstream compactionFileStream;
@@ -1984,9 +1976,9 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
 
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
@@ -2008,14 +2000,14 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                 if(appendEntryResponse.term > this->currentTerm) {
                     this->state = ReplicaState::FOLLOWER;
                     this->currentTerm = appendEntryResponse.term;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                     break;
                 }
 
                 if(!appendEntryResponse.success) {
                     this->currentTerm = appendEntryResponse.term;
                     this->state = ReplicaState::FOLLOWER;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                 }
                 else {
                     ++replicationAmount;
@@ -2064,14 +2056,14 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                     if(appendEntryResponse.term > this->currentTerm) {
                         this->state = ReplicaState::FOLLOWER;
                         this->currentTerm = appendEntryResponse.term;
-                        this->votedFor = Replica::getNullID();
+                        this->votedFor = getNullID();
                         break;
                     }
 
                     if(!appendEntryResponse.success) {
                         this->currentTerm = appendEntryResponse.term;
                         this->state = ReplicaState::FOLLOWER;
-                        this->votedFor = Replica::getNullID();
+                        this->votedFor = getNullID();
                     }
                     else {
                         ++replicationAmount;
@@ -2131,51 +2123,6 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
     return true;
 }
 
-Entry
-Replica::getEmptyLogEntry() {
-    Entry emptyLogEntry;
-    emptyLogEntry.type = EntryType::EMPTY_ENTRY;
-    emptyLogEntry.key = "";
-    emptyLogEntry.value = "";
-    emptyLogEntry.term = -1;
-    emptyLogEntry.clientIdentifier = "";
-    emptyLogEntry.requestIdentifier = std::numeric_limits<int>::max();
-
-    return emptyLogEntry;
-}
-
-unsigned int
-Replica::getElectionTimeout() {
-    unsigned int minTimeMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
-    unsigned int maxTimeMS = atoi(dotenv::env[Replica::MAX_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
-
-    srand(time(0));
-
-    return (rand() % (maxTimeMS - minTimeMS)) + minTimeMS;
-}
-
-std::vector<ID>
-Replica::getMemberIDs(const std::vector<std::string>& socketAddrs) {
-    std::vector<ID> membership;
-
-    for(const std::string& addr : socketAddrs) {
-        std::stringstream ss(addr);
-        std::string host;
-        std::string portStr;
-
-        getline(ss, host, ':');
-        getline(ss, portStr, ':');
-
-        ID id;
-        id.hostname = host;
-        id.port = atoi(portStr.c_str());
-
-        membership.push_back(id);
-    }
-
-    return membership;
-}
-
 bool
 Replica::isAtLeastAsUpToDateAs(unsigned int otherLastLogIndex,
                                unsigned int otherLastLogTerm,
@@ -2228,20 +2175,6 @@ Replica::findUpdatedCommitIndex() {
     }
 
     return possibleNewCommitIndex;
-}
-
-ID
-Replica::getNullID() {
-    ID nullID;
-    nullID.hostname = "";
-    nullID.port = 0;
-
-    return nullID;
-}
-
-bool
-Replica::isANullID(const ID& id) {
-    return id.hostname == "" && id.port == 0;
 }
 
 Snapshot

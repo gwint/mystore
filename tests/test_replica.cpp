@@ -5,6 +5,10 @@
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
+#include "utils.hpp"
+
+#include "gen-cpp/replicaservice_types.h"
+#include "gen-cpp/ReplicaService.h"
 
 #include <pthread.h>
 
@@ -143,6 +147,33 @@ TEST(OperatorTests, LogCoutOperatorTest) {
     ASSERT_EQ(expectedOutput, capturedStr);
 
     std::cout.rdbuf(oldCoutStreamBuf);
+}
+
+TEST(StaticFunctionTests, TestElectionTimeoutsInRange) {
+    Entry entry = getEmptyLogEntry();
+
+    ASSERT_EQ(entry.type, EntryType::EMPTY_ENTRY);
+    ASSERT_EQ(entry.key, "");
+    ASSERT_EQ(entry.value, "");
+    ASSERT_EQ(entry.term, -1);
+    ASSERT_EQ(entry.clientIdentifier, "");
+    ASSERT_EQ(entry.requestIdentifier, std::numeric_limits<int>::max());
+}
+
+TEST(StaticFunctionTests, TestGetEmptyLogEntry) {
+    ASSERT_TRUE(false);
+}
+
+TEST(StaticFunctionTests, TestGetMemberIDs) {
+    ASSERT_TRUE(false);
+}
+
+TEST(StaticFunctionTests, TestGetNullID) {
+    ASSERT_TRUE(false);
+}
+
+TEST(StaticFunctionTests, TestIsANullID) {
+    ASSERT_TRUE(false);
 }
 
 int
