@@ -120,6 +120,7 @@ target_include_directories(HelperFiles PRIVATE cpp-dotenv/src/cpp-dotenv/)
 target_include_directories(HelperFiles PRIVATE argparse/src/argparse/)
 
 target_include_directories(MyStoreTests PRIVATE spdlog/src/spdlog/include/)
+target_include_directories(MyStoreTests PRIVATE cpp-dotenv/src/cpp-dotenv/)
 
 target_include_directories(MyStoreTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/)
 

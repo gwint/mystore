@@ -6,9 +6,12 @@
 #include "replica.hpp"
 #include "lockhandler.hpp"
 #include "utils.hpp"
+#include "constants.hpp"
 
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
+
+#include "dotenv.h"
 
 #include <pthread.h>
 
@@ -150,6 +153,14 @@ TEST(OperatorTests, LogCoutOperatorTest) {
 }
 
 TEST(StaticFunctionTests, TestElectionTimeoutsInRange) {
+    for(int i = 0; i < 10000; ++i) {
+        unsigned int timeout = getElectionTimeout();
+        ASSERT_TRUE(timeout >= atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str()) &&
+                    timeout <= atoi(dotenv::env[MAX_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str())); 
+    }
+}
+
+TEST(StaticFunctionTests, TestGetEmptyLogEntry) {
     Entry entry = getEmptyLogEntry();
 
     ASSERT_EQ(entry.type, EntryType::EMPTY_ENTRY);
@@ -160,20 +171,39 @@ TEST(StaticFunctionTests, TestElectionTimeoutsInRange) {
     ASSERT_EQ(entry.requestIdentifier, std::numeric_limits<int>::max());
 }
 
-TEST(StaticFunctionTests, TestGetEmptyLogEntry) {
-    ASSERT_TRUE(false);
-}
-
 TEST(StaticFunctionTests, TestGetMemberIDs) {
-    ASSERT_TRUE(false);
+    std::vector<std::string> socketAddrs = {"127.0.1.1:5000", "127.0.1.1:5001", "127.0.1.1:5002"};
+    std::vector<ID> ids = getMemberIDs(socketAddrs);
+
+    ID id1;
+    id1.hostname = "127.0.1.1";
+    id1.port = 5000;
+    ID id2;
+    id2.hostname = "127.0.1.1";
+    id2.port = 5001;
+    ID id3;
+    id3.hostname = "127.0.1.1";
+    id3.port = 5002;
+
+    ASSERT_EQ(socketAddrs.size(), ids.size());
+    ASSERT_EQ(id1, ids.at(0));
+    ASSERT_EQ(id2, ids.at(1));
+    ASSERT_EQ(id3, ids.at(2));
 }
 
 TEST(StaticFunctionTests, TestGetNullID) {
-    ASSERT_TRUE(false);
+    ID id = getNullID();
+
+    ASSERT_EQ(id.hostname, "");
+    ASSERT_EQ(id.port, 0);
 }
 
 TEST(StaticFunctionTests, TestIsANullID) {
-    ASSERT_TRUE(false);
+    ID emptyID = ID();
+    emptyID.hostname = "";
+    emptyID.port = 0;
+
+    ASSERT_TRUE(isANullID(emptyID));
 }
 
 int
