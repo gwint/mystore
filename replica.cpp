@@ -33,22 +33,7 @@
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
 
-#define NDEBUG
-
 using apache::thrift::transport::TTransportException;
-
-bool
-areAMajorityGreaterThanOrEqual(std::vector<int> numLst, int num) {
-    unsigned int numForMajority = (numLst.size() / 2) + 1;
-    unsigned int numGreaterThanOrEqual = 0;
-    for(const int& currNum : numLst) {
-        if(currNum >= num) {
-            ++numGreaterThanOrEqual;
-        }
-    }
-
-    return numGreaterThanOrEqual >= numForMajority;
-}
 
 Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocketAddrs) : state(ReplicaState::FOLLOWER),
                                                                                           currentTerm(0),
@@ -239,7 +224,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         }
 
         #ifndef NDEBUG
-        if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+        if(this->log.size() >= (unsigned) atoi(dotenv::env[MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
             this->currentSnapshot = this->getSnapshot();
         }
         #endif
@@ -632,7 +617,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
     this->log.push_back(newLogEntry);
 
     #ifndef NDEBUG
-    if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+    if(this->log.size() >= (unsigned) atoi(dotenv::env[MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
         this->currentSnapshot = this->getSnapshot();
     }
     #endif
@@ -901,7 +886,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     this->log.push_back(newLogEntry);
 
     #ifndef NDEBUG
-    if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+    if(this->log.size() >= (unsigned) atoi(dotenv::env[MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
         this->currentSnapshot = this->getSnapshot();
     }
     #endif
@@ -1160,6 +1145,7 @@ Replica::getInformation(GetInformationResponse& _return) {
         }
         catch(TTransportException& e) {
             #ifndef NDEBUG
+            std::stringstream msg;
             msg.str("");
             msg << "Error while opening a connection to get information from replica at " << id << ":" << e.getType();
             this->logMsg(msg.str());
@@ -1175,6 +1161,7 @@ Replica::getInformation(GetInformationResponse& _return) {
 
         try {
             #ifndef NDEBUG
+            std::stringstream msg;
             msg.str("");
             msg << "Now sending a getInformationHelper request to " << id << "; may take a while...";
             this->logMsg(msg.str());
@@ -1891,6 +1878,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
 
     if(requestIdentifier == this->currentRequestBeingServiced) {
         #ifndef NDEBUG
+        std::stringstream msg;
         msg.str("");
         msg << "Continuing servicing of request " << requestIdentifier;
         this->logMsg(msg.str());
@@ -2186,13 +2174,6 @@ Replica::getSnapshot() {
     for(auto const& mapping : this->stateMachine) {
         newSnapshot.mappings.push_back(mapping);
     }
-
-    #ifndef NDEBUG
-    std::stringstream msg;
-    msg << "Taking snapshot: index=" << newSnapshot.lastIncludedIndex << ", term=" <<
-                newSnapshot.lastIncludedTerm << ", " << newSnapshot.mappings;
-    this->logMsg(msg.str());
-    #endif
 
     return newSnapshot;
 }

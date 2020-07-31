@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <stdexcept>
 #include <vector>
 #include <algorithm>
@@ -152,7 +153,7 @@ TEST(OperatorTests, LogCoutOperatorTest) {
     std::cout.rdbuf(oldCoutStreamBuf);
 }
 
-TEST(StaticFunctionTests, TestElectionTimeoutsInRange) {
+TEST(HelperFunctionTests, TestElectionTimeoutsInRange) {
     for(int i = 0; i < 10000; ++i) {
         unsigned int timeout = getElectionTimeout();
         ASSERT_TRUE(timeout >= atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str()) &&
@@ -160,7 +161,7 @@ TEST(StaticFunctionTests, TestElectionTimeoutsInRange) {
     }
 }
 
-TEST(StaticFunctionTests, TestGetEmptyLogEntry) {
+TEST(HelperFunctionTests, TestGetEmptyLogEntry) {
     Entry entry = getEmptyLogEntry();
 
     ASSERT_EQ(entry.type, EntryType::EMPTY_ENTRY);
@@ -171,7 +172,7 @@ TEST(StaticFunctionTests, TestGetEmptyLogEntry) {
     ASSERT_EQ(entry.requestIdentifier, std::numeric_limits<int>::max());
 }
 
-TEST(StaticFunctionTests, TestGetMemberIDs) {
+TEST(HelperFunctionTests, TestGetMemberIDs) {
     std::vector<std::string> socketAddrs = {"127.0.1.1:5000", "127.0.1.1:5001", "127.0.1.1:5002"};
     std::vector<ID> ids = getMemberIDs(socketAddrs);
 
@@ -191,19 +192,38 @@ TEST(StaticFunctionTests, TestGetMemberIDs) {
     ASSERT_EQ(id3, ids.at(2));
 }
 
-TEST(StaticFunctionTests, TestGetNullID) {
+TEST(HelperFunctionTests, TestGetNullID) {
     ID id = getNullID();
 
     ASSERT_EQ(id.hostname, "");
     ASSERT_EQ(id.port, 0);
 }
 
-TEST(StaticFunctionTests, TestIsANullID) {
+TEST(HelperFunctionTests, TestIsANullID) {
     ID emptyID = ID();
     emptyID.hostname = "";
     emptyID.port = 0;
 
     ASSERT_TRUE(isANullID(emptyID));
+}
+
+TEST(HelperFunctionTests, TestAreAMajorityGreaterThanOrEqual) {
+    std::vector<int> nums = {2, 4, 6, 8};
+
+    ASSERT_TRUE(areAMajorityGreaterThanOrEqual(nums, 4));
+    ASSERT_FALSE(areAMajorityGreaterThanOrEqual(nums, 8));
+}
+
+TEST(RPCTests, TestKill) {
+    ASSERT_TRUE(false);
+}
+
+TEST(RPCTests, TestRequestVote) {
+    ASSERT_TRUE(false);
+}
+
+TEST(RPCTests, TestAppendEntry) {
+    ASSERT_TRUE(false);
 }
 
 int

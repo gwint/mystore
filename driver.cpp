@@ -11,6 +11,10 @@
 
 int
 main(int argc, const char** argv) {
+    #ifndef NDEBUG
+    std::cout << "The debug flag is set!" << std::endl;
+    #endif
+
     ArgumentParser parser;
 
     parser.addArgument("--listeningport", 1, false);

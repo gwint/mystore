@@ -9,7 +9,8 @@
 #include "gen-cpp/replicaservice_types.h"
 #include "gen-cpp/ReplicaService.h"
 
-Entry getEmptyLogEntry() {
+Entry
+getEmptyLogEntry() {
     Entry emptyLogEntry;
     emptyLogEntry.type = EntryType::EMPTY_ENTRY;
     emptyLogEntry.key = "";
@@ -21,7 +22,8 @@ Entry getEmptyLogEntry() {
     return emptyLogEntry;
 }
 
-unsigned int getElectionTimeout() {
+unsigned int
+getElectionTimeout() {
     unsigned int minTimeMS = atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
     unsigned int maxTimeMS = atoi(dotenv::env[MAX_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
 
@@ -30,7 +32,8 @@ unsigned int getElectionTimeout() {
     return (rand() % (maxTimeMS - minTimeMS)) + minTimeMS;
 }
 
-std::vector<ID> getMemberIDs(const std::vector<std::string>& socketAddrs) {
+std::vector<ID>
+getMemberIDs(const std::vector<std::string>& socketAddrs) {
     std::vector<ID> membership;
 
     for(const std::string& addr : socketAddrs) {
@@ -51,7 +54,8 @@ std::vector<ID> getMemberIDs(const std::vector<std::string>& socketAddrs) {
     return membership;
 }
 
-ID getNullID() {
+ID
+getNullID() {
     ID nullID;
     nullID.hostname = "";
     nullID.port = 0;
@@ -59,7 +63,20 @@ ID getNullID() {
     return nullID;
 }
 
-bool isANullID(const ID& id) {
+bool
+isANullID(const ID& id) {
     return id.hostname == "" && id.port == 0;
 }
 
+bool
+areAMajorityGreaterThanOrEqual(std::vector<int> numLst, int num) {
+    unsigned int numForMajority = (numLst.size() / 2) + 1;
+    unsigned int numGreaterThanOrEqual = 0;
+    for(const int& currNum : numLst) {
+        if(currNum >= num) {
+            ++numGreaterThanOrEqual;
+        }
+    }
+
+    return numGreaterThanOrEqual >= numForMajority;
+}

@@ -131,4 +131,5 @@ target_link_libraries(HelperFiles ThriftFileCompilation)
 target_link_libraries(MyStore HelperFiles)
 
 target_link_libraries(MyStoreTests gtest_main)
+target_link_libraries(MyStoreTests gmock_main)
 target_link_libraries(MyStoreTests HelperFiles)
