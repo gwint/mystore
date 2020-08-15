@@ -5,8 +5,8 @@
 
 #include "constants.hpp"
 
-#include "gen-cpp/replicaservice_types.h"
-#include "gen-cpp/ReplicaService.h"
+#include "replicaservice_types.h"
+#include "ReplicaService.h"
 
 Entry getEmptyLogEntry();
 unsigned int getElectionTimeout();

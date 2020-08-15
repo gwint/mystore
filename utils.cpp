@@ -1,13 +1,14 @@
 #include <stdlib.h>
 #include <sstream>
+#include <iostream>
 
 #include "dotenv.h"
 
 #include "constants.hpp"
 #include "utils.hpp"
 
-#include "gen-cpp/replicaservice_types.h"
-#include "gen-cpp/ReplicaService.h"
+#include "replicaservice_types.h"
+#include "ReplicaService.h"
 
 Entry
 getEmptyLogEntry() {
@@ -26,6 +27,9 @@ unsigned int
 getElectionTimeout() {
     unsigned int minTimeMS = atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
     unsigned int maxTimeMS = atoi(dotenv::env[MAX_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+
+    std::cout << minTimeMS << "\n";
+    std::cout << maxTimeMS << "\n";
 
     srand(time(0));
 

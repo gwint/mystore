@@ -12,8 +12,8 @@
 
 #include "lockhandler.hpp"
 
-#include "gen-cpp/replicaservice_types.h"
-#include "gen-cpp/ReplicaService.h"
+#include "replicaservice_types.h"
+#include "ReplicaService.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
