@@ -7,11 +7,13 @@
 #include <queue>
 #include <stack>
 #include <thread>
+#include <functional>
+#include <sstream>
 
 #include "lockhandler.hpp"
 
-#include "gen-cpp/replicaservice_types.h"
-#include "gen-cpp/ReplicaService.h"
+#include "replicaservice_types.h"
+#include "ReplicaService.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
@@ -37,6 +39,15 @@ enum ReplicaState {
     CANDIDATE
 };
 
+struct IDHasher {
+    size_t operator()(const ID& id) const {
+        std::stringstream ss;
+        ss << id;
+
+        return std::hash<std::string>{}(ss.str());
+    }
+};
+
 class Replica : virtual public ReplicaServiceIf {
     private:
         ReplicaState state;
@@ -44,8 +55,8 @@ class Replica : virtual public ReplicaServiceIf {
         int commitIndex;
         int lastApplied;
         std::vector<Entry> log;
-        std::map<ID, int> nextIndex;
-        std::map<ID, int> matchIndex;
+        std::unordered_map<ID, int, IDHasher> nextIndex;
+        std::unordered_map<ID, int, IDHasher> matchIndex;
         int timeout;
         int timeLeft;
         int heartbeatTick;
@@ -67,12 +78,6 @@ class Replica : virtual public ReplicaServiceIf {
         Snapshot currentSnapshot;
 	bool willingToVote;
 
-        static Entry getEmptyLogEntry();
-        static unsigned int getElectionTimeout();
-        static std::vector<ID> getMemberIDs(const std::vector<std::string>&);
-        static ID getNullID();
-        static bool isANullID(const ID&);
-
         bool isAtLeastAsUpToDateAs(unsigned int,
                                    unsigned int,
                                    unsigned int,
@@ -83,15 +88,6 @@ class Replica : virtual public ReplicaServiceIf {
         void logMsg(std::string);
 
         Snapshot getSnapshot();
-
-        static const char* MIN_ELECTION_TIMEOUT_ENV_VAR_NAME;
-        static const char* MAX_ELECTION_TIMEOUT_ENV_VAR_NAME;
-        static const char* CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME;
-        static const char* HEARTBEAT_TICK_ENV_VAR_NAME;
-        static const char* RPC_TIMEOUT_ENV_VAR_NAME;
-        static const char* RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME;
-        static const char* SNAPSHOT_FILE_ENV_VAR_NAME;
-        static const char* MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME;
 
     public:
         Replica(unsigned int, const std::vector<std::string>&);
@@ -113,101 +109,19 @@ class Replica : virtual public ReplicaServiceIf {
 };
 
 std::ostream&
-operator<<(std::ostream& os, const std::unordered_map<std::string, std::vector<std::string>>& stateMachine) {
-    os << "[";
-    unsigned int count = 0;
-    for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
-        os << it->first << "=>" << it->second.back();
-        if(count < stateMachine.size()-1) {
-            os << ", ";
-        }
-        ++count;
-    }
-    os << "]";
-
-    return os;
-}
+operator<<(std::ostream&, const std::unordered_map<std::string, std::vector<std::string>>&);
 
 std::ostream&
-operator<<(std::ostream& os, const std::vector<Entry>& log) {
-    os << "[";
-    for(unsigned int i = 0; i < log.size(); ++i) {
-        os << log[i];
-
-        if(i < log.size()-1) {
-            os << ", ";
-        }
-    }
-    os << "]";
-
-    return os;
-}
+operator<<(std::ostream&, const std::vector<Entry>&);
 
 std::ostream&
-operator<<(std::ostream& os, const ReplicaState& state) {
-    switch(state) {
-        case ReplicaState::LEADER:
-            os << "LEADER";
-            break;
-        case ReplicaState::CANDIDATE:
-            os << "CANDIDATE";
-            break;
-        case ReplicaState::FOLLOWER:
-            os << "FOLLOWER";
-            break;
-    };
-
-    return os;
-}
+operator<<(std::ostream&, const ReplicaState&);
 
 std::ostream&
-operator<<(std::ostream& os, const Snapshot& snapshot) {
-    os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
-
-    for(auto const& mapping : snapshot.mappings) {
-        os << mapping.first << '\n' << mapping.second.back() << '\n';
-    }
-
-    return os;
-}
+operator<<(std::ostream&, const Snapshot&);
 
 std::istream&
-operator>>(std::istream& is, Snapshot& snapshot) {
-    int lastIncludedIndex,
-        lastIncludedTerm;
-
-    is >> lastIncludedIndex >> lastIncludedTerm;
-
-    snapshot.lastIncludedIndex = lastIncludedIndex;
-    snapshot.lastIncludedTerm = lastIncludedTerm;
-
-    /*
-    while(is) {
-        std::string key, value;
-        is >> key >> value;
-
-        std::stack<std::string>> valueStack;
-        valueStack.push(value);
-
-        snapshot.mappings.push_back({key, value});
-    }
-    */
-
-    return is;
-}
-
-std::ostream&
-operator<<(std::ostream& os, std::vector<std::pair<std::string, std::string>>& mappings) {
-    os << "[";
-    for(unsigned int i = 0; i < mappings.size(); ++i) {
-        os << mappings[i].first << "=>" << mappings[i].second;
-        if(i < mappings.size()-1) {
-            os << ", ";
-        }
-    }
-    os << "]";
-
-    return os;
-}
+operator>>(std::istream&, Snapshot&);
 
 #endif
+

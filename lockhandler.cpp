@@ -1,49 +1,47 @@
 #include <algorithm>
 #include <iostream>
+#include <stdexcept>
 
 #include "lockhandler.hpp"
 #include "locknames.hpp"
-
+#include <vector>
 #include <pthread.h>
 
-LockHandler::LockHandler(unsigned int numLocksIn) : numLocks(numLocksIn) {
-    this->locks = new pthread_mutex_t[numLocksIn];
+LockHandler::LockHandler(int numLocksIn) {
+    if(numLocksIn <= 0) {
+        throw std::invalid_argument("The number of locks this lockhandler is responsible for must be non-negative");
+    }
 
     for(unsigned int i = 0; i < numLocksIn; ++i) {
-        pthread_mutex_init(&this->locks[i], NULL);
+        this->mutexes.push_back(pthread_mutex_t());
+        pthread_mutex_init(&this->mutexes.back(), NULL);
     }
 }
 
-LockHandler::~LockHandler() {
-    delete[] this->locks;
+std::vector<pthread_mutex_t>&
+LockHandler::getLocks() {
+    return this->mutexes;
 }
 
-/*
-template <typename T, typename... Types>
 void
-LockHandler::releaseLocks(T lock, Types... rest) {
-    std::vector<LockName> locksToRelease;
-    LockHandler::collect(&locksToRelease, lock, rest...);
+LockHandler::acquireLocks(std::initializer_list<LockName> lockNames) {
+    std::vector<LockName> locksToAcquire(lockNames.begin(), lockNames.end());
+
+    std::sort(locksToAcquire.begin(), locksToAcquire.end());
+
+    for(LockName lockName : locksToAcquire) {
+        pthread_mutex_lock(&this->mutexes[lockName]);
+    }
+}
+
+void
+LockHandler::releaseLocks(std::initializer_list<LockName> lockNames) {
+    std::vector<LockName> locksToRelease(lockNames.begin(), lockNames.end());
 
     std::sort(locksToRelease.begin(), locksToRelease.end());
     std::reverse(locksToRelease.begin(), locksToRelease.end());
 
     for(LockName lockName : locksToRelease) {
-        pthread_mutex_unlock(&this->locks[lockName]);
-    }
-}
-*/
-
-void
-LockHandler::lockAll() {
-    for(unsigned int i = 0; i < this->numLocks; ++i) {
-        pthread_mutex_lock(&this->locks[i]);
-    }
-}
-
-void
-LockHandler::unlockAll() {
-    for(unsigned int i = 0; i < this->numLocks; ++i) {
-        pthread_mutex_unlock(&this->locks[i]);
+        pthread_mutex_unlock(&this->mutexes[lockName]);
     }
 }

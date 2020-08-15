@@ -10,10 +10,12 @@
 #include <cassert>
 #include <fstream>
 #include <unordered_set>
+#include <stdexcept>
 
 #include "replica.hpp"
 #include "lockhandler.hpp"
 #include "locknames.hpp"
+#include "utils.hpp"
 
 #include "dotenv.h"
 #include "spdlog/spdlog.h"
@@ -28,53 +30,29 @@
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TThreadedServer.h>
 
-#include "gen-cpp/replicaservice_types.h"
-#include "gen-cpp/ReplicaService.h"
-
-#define NDEBUG
+#include "replicaservice_types.h"
+#include "ReplicaService.h"
 
 using apache::thrift::transport::TTransportException;
-
-bool
-areAMajorityGreaterThanOrEqual(std::vector<int> numLst, int num) {
-    unsigned int numForMajority = (numLst.size() / 2) + 1;
-    unsigned int numGreaterThanOrEqual = 0;
-    for(const int& currNum : numLst) {
-        if(currNum >= num) {
-            ++numGreaterThanOrEqual;
-        }
-    }
-
-    return numGreaterThanOrEqual >= numForMajority;
-}
-
-const char* Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MIN_MS";
-const char* Replica::MAX_ELECTION_TIMEOUT_ENV_VAR_NAME = "RANDOM_TIMEOUT_MAX_MS";
-const char* Replica::CLUSTER_MEMBERSHIP_FILE_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE";
-const char* Replica::HEARTBEAT_TICK_ENV_VAR_NAME = "HEARTBEAT_TICK_MS";
-const char* Replica::RPC_TIMEOUT_ENV_VAR_NAME = "RPC_TIMEOUT_MS";
-const char* Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME = "MIN_RPC_RETRY_TIMEOUT";
-const char* Replica::SNAPSHOT_FILE_ENV_VAR_NAME = "SNAPSHOT_FILE";
-const char* Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME = "MAX_ALLOWED_LOG_SIZE";
 
 Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocketAddrs) : state(ReplicaState::FOLLOWER),
                                                                                           currentTerm(0),
                                                                                           commitIndex(0),
                                                                                           lastApplied(0),
-                                                                                          timeout(Replica::getElectionTimeout()),
-                                                                                          votedFor(Replica::getNullID()),
-                                                                                          leader(Replica::getNullID()),
+                                                                                          timeout(getElectionTimeout()),
+                                                                                          votedFor(getNullID()),
+                                                                                          leader(getNullID()),
                                                                                           currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
                                                                                           hasOperationStarted(false),
-                                                                                          clusterMembership(Replica::getMemberIDs(clusterSocketAddrs)),
+                                                                                          clusterMembership(getMemberIDs(clusterSocketAddrs)),
                                                                                           lockHandler(16),
                                                                                           noopIndex(0),
 											  willingToVote(true) {
 
     this->timeLeft = this->timeout;
-    this->heartbeatTick = atoi(dotenv::env[Replica::HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
+    this->heartbeatTick = atoi(dotenv::env[HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
 
-    this->log.push_back(Replica::getEmptyLogEntry());
+    this->log.push_back(getEmptyLogEntry());
 
     char hostBuffer[256];
     gethostname(hostBuffer, sizeof(hostBuffer));
@@ -106,12 +84,12 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
     int ballotTerm = -1;
     bool voteGranted = false;
 
-    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::STATE_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::WILLING_TO_VOTE_LOCK);
+    this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::STATE_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::WILLING_TO_VOTE_LOCK});
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -122,12 +100,12 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
     if(term > this->currentTerm) {
         this->state = ReplicaState::FOLLOWER;
         this->currentTerm = term;
-        this->votedFor = Replica::getNullID();
+        this->votedFor = getNullID();
     }
 
     ballotTerm = this->currentTerm;
 
-    if((this->votedFor == candidateID || Replica::isANullID(this->votedFor)) &&
+    if((this->votedFor == candidateID || isANullID(this->votedFor)) &&
                 this->isAtLeastAsUpToDateAs(lastLogIndex,
                                             lastLogTerm,
                                             this->log.size()-1,
@@ -142,12 +120,12 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
         this->votedFor = candidateID;
     }
 
-    this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::STATE_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::WILLING_TO_VOTE_LOCK);
+    this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::STATE_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::WILLING_TO_VOTE_LOCK});
 
     _return.voteGranted = voteGranted;
     _return.term = ballotTerm;
@@ -158,17 +136,17 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
     _return.success = true;
 
-    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::STATE_LOCK,
-                                   LockName::LAST_APPLIED_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::MAP_LOCK,
-                                   LockName::TIMER_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                   LockName::WILLING_TO_VOTE_LOCK);
+    this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::STATE_LOCK,
+                                    LockName::LAST_APPLIED_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::MAP_LOCK,
+                                    LockName::TIMER_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                    LockName::WILLING_TO_VOTE_LOCK});
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -197,17 +175,17 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         _return.term = std::max(term, this->currentTerm);
         this->currentTerm = std::max(term, this->currentTerm);
 
-        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::STATE_LOCK,
-                                       LockName::LAST_APPLIED_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::MAP_LOCK,
-                                       LockName::TIMER_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                       LockName::WILLING_TO_VOTE_LOCK);
+        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::STATE_LOCK,
+                                        LockName::LAST_APPLIED_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::MAP_LOCK,
+                                        LockName::TIMER_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                        LockName::WILLING_TO_VOTE_LOCK});
 
         return;
     }
@@ -246,7 +224,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         }
 
         #ifndef NDEBUG
-        if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+        if(this->log.size() >= (unsigned) atoi(dotenv::env[MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
             this->currentSnapshot = this->getSnapshot();
         }
         #endif
@@ -289,33 +267,33 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     this->currentTerm = std::max(term, this->currentTerm);
     _return.term = this->currentTerm;
 
-    this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::STATE_LOCK,
-                                   LockName::LAST_APPLIED_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::MAP_LOCK,
-                                   LockName::TIMER_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                   LockName::WILLING_TO_VOTE_LOCK);
+    this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::STATE_LOCK,
+                                    LockName::LAST_APPLIED_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::MAP_LOCK,
+                                    LockName::TIMER_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                    LockName::WILLING_TO_VOTE_LOCK});
 }
 
 void
 Replica::get(GetResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier, const int32_t numPastMappings) {
     _return.success = true;
 
-    this->lockHandler.acquireLocks(LockName::STATE_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::MATCH_INDEX_LOCK,
-                                   LockName::LATEST_NO_OP_LOG_INDEX,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::MATCH_INDEX_LOCK,
+                                    LockName::LATEST_NO_OP_LOG_INDEX,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
     #ifndef NDEBUG
     std::stringstream msg;
@@ -331,21 +309,21 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         #endif
 
         _return.success = false;
-        _return.leaderID = Replica::getNullID();
-        if(!Replica::isANullID(this->leader)) {
+        _return.leaderID = getNullID();
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::LATEST_NO_OP_LOG_INDEX,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::LATEST_NO_OP_LOG_INDEX,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -358,9 +336,9 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -382,7 +360,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                    this->myID,
                                    this->log.size()-1,
                                    this->log.back().term,
-                                   Replica::getEmptyLogEntry(),
+                                   getEmptyLogEntry(),
                                    this->commitIndex);
 
                 #ifndef NDEBUG
@@ -394,7 +372,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                 if(appendEntryResponse.term > this->currentTerm) {
                     this->state = ReplicaState::FOLLOWER;
                     this->currentTerm = appendEntryResponse.term;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                     _return.success = false;
 
                     #ifndef NDEBUG
@@ -403,16 +381,16 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                     this->logMsg(msg.str());
                     #endif
 
-                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                                   LockName::LEADER_LOCK,
-                                                   LockName::CURR_TERM_LOCK,
-                                                   LockName::LOG_LOCK,
-                                                   LockName::COMMIT_INDEX_LOCK,
-                                                   LockName::VOTED_FOR_LOCK,
-                                                   LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LATEST_NO_OP_LOG_INDEX,
-                                                   LockName::SNAPSHOT_LOCK,
-                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                    LockName::LEADER_LOCK,
+                                                    LockName::CURR_TERM_LOCK,
+                                                    LockName::LOG_LOCK,
+                                                    LockName::COMMIT_INDEX_LOCK,
+                                                    LockName::VOTED_FOR_LOCK,
+                                                    LockName::MATCH_INDEX_LOCK,
+                                                    LockName::LATEST_NO_OP_LOG_INDEX,
+                                                    LockName::SNAPSHOT_LOCK,
+                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                     return;
                 }
@@ -426,16 +404,16 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                     this->logMsg(msg.str());
                     #endif
 
-                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                                   LockName::LEADER_LOCK,
-                                                   LockName::CURR_TERM_LOCK,
-                                                   LockName::LOG_LOCK,
-                                                   LockName::COMMIT_INDEX_LOCK,
-                                                   LockName::VOTED_FOR_LOCK,
-                                                   LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LATEST_NO_OP_LOG_INDEX,
-                                                   LockName::SNAPSHOT_LOCK,
-                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                    LockName::LEADER_LOCK,
+                                                    LockName::CURR_TERM_LOCK,
+                                                    LockName::LOG_LOCK,
+                                                    LockName::COMMIT_INDEX_LOCK,
+                                                    LockName::VOTED_FOR_LOCK,
+                                                    LockName::MATCH_INDEX_LOCK,
+                                                    LockName::LATEST_NO_OP_LOG_INDEX,
+                                                    LockName::SNAPSHOT_LOCK,
+                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                     return;
                 }
@@ -477,16 +455,16 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         this->logMsg(msg.str());
         #endif
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::LATEST_NO_OP_LOG_INDEX,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::LATEST_NO_OP_LOG_INDEX,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -514,32 +492,32 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         }
     }
 
-    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::MATCH_INDEX_LOCK,
-                                   LockName::LATEST_NO_OP_LOG_INDEX,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::MATCH_INDEX_LOCK,
+                                    LockName::LATEST_NO_OP_LOG_INDEX,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
 }
 
 void
 Replica::deletekey(DelResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier) {
-    this->lockHandler.acquireLocks(LockName::STATE_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::NEXT_INDEX_LOCK,
-                                   LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::NEXT_INDEX_LOCK,
+                                    LockName::LAST_APPLIED_LOCK,
+                                    LockName::MATCH_INDEX_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
     _return.success = true;
 
@@ -557,21 +535,21 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         #endif
 
         _return.success = false;
-        if(!Replica::isANullID(this->leader)) {
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::LAST_APPLIED_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -615,17 +593,17 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         this->logMsg(msg.str());
         #endif
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::LAST_APPLIED_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -639,7 +617,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
     this->log.push_back(newLogEntry);
 
     #ifndef NDEBUG
-    if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+    if(this->log.size() >= (unsigned) atoi(dotenv::env[MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
         this->currentSnapshot = this->getSnapshot();
     }
     #endif
@@ -654,9 +632,9 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -692,20 +670,20 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
             if(appendEntryResponse.term > this->currentTerm) {
                 this->currentTerm = appendEntryResponse.term;
                 this->state = ReplicaState::FOLLOWER;
-                this->votedFor = Replica::getNullID();
+                this->votedFor = getNullID();
                 _return.success = false;
 
-                this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                               LockName::LEADER_LOCK,
-                                               LockName::CURR_TERM_LOCK,
-                                               LockName::LOG_LOCK,
-                                               LockName::COMMIT_INDEX_LOCK,
-                                               LockName::VOTED_FOR_LOCK,
-                                               LockName::NEXT_INDEX_LOCK,
-                                               LockName::LAST_APPLIED_LOCK,
-                                               LockName::MATCH_INDEX_LOCK,
-                                               LockName::SNAPSHOT_LOCK,
-                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
+                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                LockName::LEADER_LOCK,
+                                                LockName::CURR_TERM_LOCK,
+                                                LockName::LOG_LOCK,
+                                                LockName::COMMIT_INDEX_LOCK,
+                                                LockName::VOTED_FOR_LOCK,
+                                                LockName::NEXT_INDEX_LOCK,
+                                                LockName::LAST_APPLIED_LOCK,
+                                                LockName::MATCH_INDEX_LOCK,
+                                                LockName::SNAPSHOT_LOCK,
+                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                 return;
             }
@@ -780,34 +758,34 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         this->lastApplied = this->log.size()-1;
     }
 
-    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::NEXT_INDEX_LOCK,
-                                   LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::NEXT_INDEX_LOCK,
+                                    LockName::LAST_APPLIED_LOCK,
+                                    LockName::MATCH_INDEX_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
     return;
 }
 
 void
 Replica::put(PutResponse& _return, const std::string& key, const std::string& value, const std::string& clientIdentifier, const int32_t requestIdentifier) {
-    this->lockHandler.acquireLocks(LockName::STATE_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::NEXT_INDEX_LOCK,
-                                   LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::NEXT_INDEX_LOCK,
+                                    LockName::LAST_APPLIED_LOCK,
+                                    LockName::MATCH_INDEX_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
     _return.success = true;
 
@@ -825,21 +803,21 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         #endif
 
         _return.success = false;
-        if(!Replica::isANullID(this->leader)) {
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::LAST_APPLIED_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -883,17 +861,17 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         this->logMsg(msg.str());
         #endif
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::LAST_APPLIED_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::LAST_APPLIED_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -908,7 +886,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     this->log.push_back(newLogEntry);
 
     #ifndef NDEBUG
-    if(this->log.size() >= (unsigned) atoi(dotenv::env[Replica::MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
+    if(this->log.size() >= (unsigned) atoi(dotenv::env[MAX_ALLOWED_LOG_SIZE_ENV_VAR_NAME].c_str())) {
         this->currentSnapshot = this->getSnapshot();
     }
     #endif
@@ -923,9 +901,9 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -961,20 +939,20 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
             if(appendEntryResponse.term > this->currentTerm) {
                 this->currentTerm = appendEntryResponse.term;
                 this->state = ReplicaState::FOLLOWER;
-                this->votedFor = Replica::getNullID();
+                this->votedFor = getNullID();
                 _return.success = false;
 
-                this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                               LockName::LEADER_LOCK,
-                                               LockName::CURR_TERM_LOCK,
-                                               LockName::LOG_LOCK,
-                                               LockName::COMMIT_INDEX_LOCK,
-                                               LockName::VOTED_FOR_LOCK,
-                                               LockName::NEXT_INDEX_LOCK,
-                                               LockName::LAST_APPLIED_LOCK,
-                                               LockName::MATCH_INDEX_LOCK,
-                                               LockName::SNAPSHOT_LOCK,
-                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
+                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                LockName::LEADER_LOCK,
+                                                LockName::CURR_TERM_LOCK,
+                                                LockName::LOG_LOCK,
+                                                LockName::COMMIT_INDEX_LOCK,
+                                                LockName::VOTED_FOR_LOCK,
+                                                LockName::NEXT_INDEX_LOCK,
+                                                LockName::LAST_APPLIED_LOCK,
+                                                LockName::MATCH_INDEX_LOCK,
+                                                LockName::SNAPSHOT_LOCK,
+                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                 return;
             }
@@ -1054,17 +1032,17 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         this->lastApplied = this->log.size()-1;
     }
 
-    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                   LockName::LEADER_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::VOTED_FOR_LOCK,
-                                   LockName::NEXT_INDEX_LOCK,
-                                   LockName::LAST_APPLIED_LOCK,
-                                   LockName::MATCH_INDEX_LOCK,
-                                   LockName::SNAPSHOT_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                    LockName::LEADER_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::VOTED_FOR_LOCK,
+                                    LockName::NEXT_INDEX_LOCK,
+                                    LockName::LAST_APPLIED_LOCK,
+                                    LockName::MATCH_INDEX_LOCK,
+                                    LockName::SNAPSHOT_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
     return;
 }
@@ -1112,23 +1090,23 @@ Replica::getInformationHelper(GetInformationHelperResponse & _return, const int3
 
 void
 Replica::getInformation(GetInformationResponse& _return) {
-    this->lockHandler.acquireLocks(LockName::STATE_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                   LockName::LEADER_LOCK);
+    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                    LockName::LEADER_LOCK});
 
     _return.success = true;
 
     if(this->state != ReplicaState::LEADER) {
         _return.success = false;
-        if(!Replica::isANullID(this->leader)) {
+        if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                       LockName::LEADER_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                        LockName::LEADER_LOCK});
 
         return;
     }
@@ -1155,9 +1133,9 @@ Replica::getInformation(GetInformationResponse& _return) {
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
         ReplicaServiceClient client(protocol);
@@ -1167,6 +1145,7 @@ Replica::getInformation(GetInformationResponse& _return) {
         }
         catch(TTransportException& e) {
             #ifndef NDEBUG
+            std::stringstream msg;
             msg.str("");
             msg << "Error while opening a connection to get information from replica at " << id << ":" << e.getType();
             this->logMsg(msg.str());
@@ -1182,6 +1161,7 @@ Replica::getInformation(GetInformationResponse& _return) {
 
         try {
             #ifndef NDEBUG
+            std::stringstream msg;
             msg.str("");
             msg << "Now sending a getInformationHelper request to " << id << "; may take a while...";
             this->logMsg(msg.str());
@@ -1193,13 +1173,13 @@ Replica::getInformation(GetInformationResponse& _return) {
             if(getInformationHelperResponse.term > this->currentTerm) {
                 this->currentTerm = getInformationHelperResponse.term;
                 this->state = ReplicaState::FOLLOWER;
-                this->votedFor = Replica::getNullID();
+                this->votedFor = getNullID();
                 _return.success = false;
 
-                this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                               LockName::LEADER_LOCK,
-                                               LockName::CURR_TERM_LOCK,
-                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
+                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                LockName::LEADER_LOCK,
+                                                LockName::CURR_TERM_LOCK,
+                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                 return;
             }
@@ -1216,47 +1196,47 @@ Replica::getInformation(GetInformationResponse& _return) {
         }
     }
 
-    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                   LockName::LEADER_LOCK);
+    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                    LockName::LEADER_LOCK});
 }
 
 void
 Replica::timer() {
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-    unsigned int minTimeoutMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+    unsigned int minTimeoutMS = atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
     
     std::stringstream msg;
 
     while(true) {
-        this->lockHandler.acquireLocks(LockName::STATE_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::TIMER_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                       LockName::WILLING_TO_VOTE_LOCK);
+        this->lockHandler.acquireLocks({LockName::STATE_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::TIMER_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                        LockName::WILLING_TO_VOTE_LOCK});
 
         if(this->state == ReplicaState::LEADER) {
-            this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                           LockName::LOG_LOCK,
-                                           LockName::CURR_TERM_LOCK,
-                                           LockName::TIMER_LOCK,
-                                           LockName::COMMIT_INDEX_LOCK,
-                                           LockName::VOTED_FOR_LOCK,
-                                           LockName::LEADER_LOCK,
-                                           LockName::NEXT_INDEX_LOCK,
-                                           LockName::MATCH_INDEX_LOCK,
-                                           LockName::SNAPSHOT_LOCK,
-                                           LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                           LockName::WILLING_TO_VOTE_LOCK);
+            this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                            LockName::LOG_LOCK,
+                                            LockName::CURR_TERM_LOCK,
+                                            LockName::TIMER_LOCK,
+                                            LockName::COMMIT_INDEX_LOCK,
+                                            LockName::VOTED_FOR_LOCK,
+                                            LockName::LEADER_LOCK,
+                                            LockName::NEXT_INDEX_LOCK,
+                                            LockName::MATCH_INDEX_LOCK,
+                                            LockName::SNAPSHOT_LOCK,
+                                            LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                            LockName::WILLING_TO_VOTE_LOCK});
 
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             continue;
@@ -1286,9 +1266,9 @@ Replica::timer() {
                 #endif
 
                 std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-                socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
                 std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
                 std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
                 ReplicaServiceClient client(protocol);
@@ -1361,9 +1341,9 @@ Replica::timer() {
                         this->matchIndex[id] = 0;
 
                         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-                        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+                        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
                         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
                         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
                         ReplicaServiceClient client(protocol);
@@ -1385,7 +1365,7 @@ Replica::timer() {
                                 if(appendEntryResponse.term > this->currentTerm) {
                                     this->state = ReplicaState::FOLLOWER;
                                     this->currentTerm = appendEntryResponse.term;
-                                    this->votedFor = Replica::getNullID();
+                                    this->votedFor = getNullID();
                                 }
 
                                 if(!appendEntryResponse.success) {
@@ -1449,18 +1429,18 @@ Replica::timer() {
 	    this->willingToVote = true;
 	} 
 
-        this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::TIMER_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::LEADER_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                       LockName::WILLING_TO_VOTE_LOCK);
+        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::TIMER_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::LEADER_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                        LockName::WILLING_TO_VOTE_LOCK});
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -1471,26 +1451,26 @@ Replica::heartbeatSender() {
     std::stringstream msg;
 
     while(true) {
-        this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::STATE_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::STATE_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         if(this->state != ReplicaState::LEADER) {
-            this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                           LockName::LOG_LOCK,
-                                           LockName::STATE_LOCK,
-                                           LockName::COMMIT_INDEX_LOCK,
-                                           LockName::VOTED_FOR_LOCK,
-                                           LockName::NEXT_INDEX_LOCK,
-                                           LockName::MATCH_INDEX_LOCK,
-                                           LockName::SNAPSHOT_LOCK,
-                                           LockName::CLUSTER_MEMBERSHIP_LOCK);
+            this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                            LockName::LOG_LOCK,
+                                            LockName::STATE_LOCK,
+                                            LockName::COMMIT_INDEX_LOCK,
+                                            LockName::VOTED_FOR_LOCK,
+                                            LockName::NEXT_INDEX_LOCK,
+                                            LockName::MATCH_INDEX_LOCK,
+                                            LockName::SNAPSHOT_LOCK,
+                                            LockName::CLUSTER_MEMBERSHIP_LOCK});
 
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             continue;
@@ -1540,15 +1520,15 @@ Replica::heartbeatSender() {
             }
 
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
 
             std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
             std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
             ReplicaServiceClient client(protocol);
 
-            Entry entryToSend = Replica::getEmptyLogEntry();
+            Entry entryToSend = getEmptyLogEntry();
             entryToSend.type = EntryType::EMPTY_ENTRY;
             unsigned int prevLogIndex = this->log.size()-1;
             unsigned int prevLogTerm = this->log.back().term;
@@ -1575,7 +1555,7 @@ Replica::heartbeatSender() {
                     if(appendEntryResponse.term > this->currentTerm) {
                         this->state = ReplicaState::FOLLOWER;
                         this->currentTerm = appendEntryResponse.term;
-                        this->votedFor = Replica::getNullID();
+                        this->votedFor = getNullID();
                         break;
                     }
 
@@ -1632,15 +1612,15 @@ Replica::heartbeatSender() {
             }
         }
 
-        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::STATE_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::VOTED_FOR_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK,
-                                       LockName::SNAPSHOT_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK);
+        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::STATE_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::VOTED_FOR_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::MATCH_INDEX_LOCK,
+                                        LockName::SNAPSHOT_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         std::this_thread::sleep_for(std::chrono::milliseconds(this->heartbeatTick));
     }
@@ -1648,7 +1628,7 @@ Replica::heartbeatSender() {
 
 void
 Replica::retryRequest() {
-    unsigned int maxTimeToSpendRetryingMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
+    unsigned int maxTimeToSpendRetryingMS = atoi(dotenv::env[MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
 
     std::stringstream msg;
 
@@ -1661,20 +1641,20 @@ Replica::retryRequest() {
         this->jobsToRetry.pop();
 
         unsigned int timeSpentOnCurrentRetryMS = 0;
-        unsigned int timeoutMS = atoi(dotenv::env[Replica::RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME].c_str());
+        unsigned int timeoutMS = atoi(dotenv::env[RPC_RETRY_TIMEOUT_MIN_ENV_VAR_NAME].c_str());
 
         while(timeSpentOnCurrentRetryMS < (0.8 * maxTimeToSpendRetryingMS)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeoutMS));
 
-            this->lockHandler.acquireLocks(LockName::STATE_LOCK,
-                                           LockName::LEADER_LOCK,
-                                           LockName::CURR_TERM_LOCK,
-                                           LockName::VOTED_FOR_LOCK,
-                                           LockName::NEXT_INDEX_LOCK,
-                                           LockName::MATCH_INDEX_LOCK,
-                                           LockName::LOG_LOCK,
-                                           LockName::SNAPSHOT_LOCK,
-                                           LockName::CLUSTER_MEMBERSHIP_LOCK);
+            this->lockHandler.acquireLocks({LockName::STATE_LOCK,
+                                            LockName::LEADER_LOCK,
+                                            LockName::CURR_TERM_LOCK,
+                                            LockName::VOTED_FOR_LOCK,
+                                            LockName::NEXT_INDEX_LOCK,
+                                            LockName::MATCH_INDEX_LOCK,
+                                            LockName::LOG_LOCK,
+                                            LockName::SNAPSHOT_LOCK,
+                                            LockName::CLUSTER_MEMBERSHIP_LOCK});
 
             Entry entry = this->log.at(job.entryPosition);
 
@@ -1682,15 +1662,15 @@ Replica::retryRequest() {
                 std::queue<Job> empty;
                 std::swap(this->jobsToRetry, empty);
 
-                this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                               LockName::LEADER_LOCK,
-                                               LockName::CURR_TERM_LOCK,
-                                               LockName::VOTED_FOR_LOCK,
-                                               LockName::NEXT_INDEX_LOCK,
-                                               LockName::MATCH_INDEX_LOCK,
-                                               LockName::LOG_LOCK,
-                                               LockName::SNAPSHOT_LOCK,
-                                               LockName::CLUSTER_MEMBERSHIP_LOCK);
+                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                LockName::LEADER_LOCK,
+                                                LockName::CURR_TERM_LOCK,
+                                                LockName::VOTED_FOR_LOCK,
+                                                LockName::NEXT_INDEX_LOCK,
+                                                LockName::MATCH_INDEX_LOCK,
+                                                LockName::LOG_LOCK,
+                                                LockName::SNAPSHOT_LOCK,
+                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                 break;
             }
@@ -1706,9 +1686,9 @@ Replica::retryRequest() {
             targetID.port = job.targetPort;
 
             std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(targetID.hostname, targetID.port));
-            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+            socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
 
             std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
             std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
@@ -1738,19 +1718,19 @@ Replica::retryRequest() {
                 if(appendEntryResponse.term > this->currentTerm) {
                     this->currentTerm = appendEntryResponse.term;
                     this->state = ReplicaState::FOLLOWER;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                     std::queue<Job> empty;
                     std::swap(this->jobsToRetry, empty);
 
-                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                                   LockName::LEADER_LOCK,
-                                                   LockName::CURR_TERM_LOCK,
-                                                   LockName::VOTED_FOR_LOCK,
-                                                   LockName::NEXT_INDEX_LOCK,
-                                                   LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LOG_LOCK,
-                                                   LockName::SNAPSHOT_LOCK,
-                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                    LockName::LEADER_LOCK,
+                                                    LockName::CURR_TERM_LOCK,
+                                                    LockName::VOTED_FOR_LOCK,
+                                                    LockName::NEXT_INDEX_LOCK,
+                                                    LockName::MATCH_INDEX_LOCK,
+                                                    LockName::LOG_LOCK,
+                                                    LockName::SNAPSHOT_LOCK,
+                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                     break;
                 }
@@ -1762,15 +1742,15 @@ Replica::retryRequest() {
                     this->logMsg(msg.str());
                     #endif
 
-                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                                   LockName::LEADER_LOCK,
-                                                   LockName::CURR_TERM_LOCK,
-                                                   LockName::VOTED_FOR_LOCK,
-                                                   LockName::NEXT_INDEX_LOCK,
-                                                   LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LOG_LOCK,
-                                                   LockName::SNAPSHOT_LOCK,
-                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                    LockName::LEADER_LOCK,
+                                                    LockName::CURR_TERM_LOCK,
+                                                    LockName::VOTED_FOR_LOCK,
+                                                    LockName::NEXT_INDEX_LOCK,
+                                                    LockName::MATCH_INDEX_LOCK,
+                                                    LockName::LOG_LOCK,
+                                                    LockName::SNAPSHOT_LOCK,
+                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
                 }
                 else {
                     #ifndef NDEBUG
@@ -1783,15 +1763,15 @@ Replica::retryRequest() {
                     this->matchIndex.at(targetID) = this->nextIndex.at(targetID);
                     ++this->nextIndex.at(targetID);
 
-                    this->lockHandler.releaseLocks(LockName::STATE_LOCK,
-                                                   LockName::LEADER_LOCK,
-                                                   LockName::CURR_TERM_LOCK,
-                                                   LockName::VOTED_FOR_LOCK,
-                                                   LockName::NEXT_INDEX_LOCK,
-                                                   LockName::MATCH_INDEX_LOCK,
-                                                   LockName::LOG_LOCK,
-                                                   LockName::SNAPSHOT_LOCK,
-                                                   LockName::CLUSTER_MEMBERSHIP_LOCK);
+                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                    LockName::LEADER_LOCK,
+                                                    LockName::CURR_TERM_LOCK,
+                                                    LockName::VOTED_FOR_LOCK,
+                                                    LockName::NEXT_INDEX_LOCK,
+                                                    LockName::MATCH_INDEX_LOCK,
+                                                    LockName::LOG_LOCK,
+                                                    LockName::SNAPSHOT_LOCK,
+                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
                     break;
                 }
             }
@@ -1817,18 +1797,18 @@ Replica::retryRequest() {
 
 int32_t
 Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int32_t lastIncludedIndex, const int32_t lastIncludedTerm, const int32_t offset, const std::string& data, const bool done) {
-    this->lockHandler.acquireLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::TIMER_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+    this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
+                                    LockName::TIMER_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::SNAPSHOT_LOCK});
 
     int termToReturn = std::max(this->currentTerm, leaderTerm);
 
     if(this->currentTerm > leaderTerm) {
-        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                       LockName::TIMER_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                        LockName::TIMER_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::SNAPSHOT_LOCK});
         return termToReturn;
     }
 
@@ -1837,7 +1817,7 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     this->timeLeft = this->timeout;
 
     std::stringstream compactionFileNameStream;
-    compactionFileNameStream << dotenv::env[Replica::SNAPSHOT_FILE_ENV_VAR_NAME] << "-" << this->myID.hostname << ":" << this->myID.port;
+    compactionFileNameStream << dotenv::env[SNAPSHOT_FILE_ENV_VAR_NAME] << "-" << this->myID.hostname << ":" << this->myID.port;
     std::string compactionFileName = compactionFileNameStream.str();
 
     std::ofstream compactionFileStream;
@@ -1857,10 +1837,10 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     compactionFileStream.close();
 
     if(!done) {
-        this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                       LockName::TIMER_LOCK,
-                                       LockName::LOG_LOCK,
-                                       LockName::SNAPSHOT_LOCK);
+        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                        LockName::TIMER_LOCK,
+                                        LockName::LOG_LOCK,
+                                        LockName::SNAPSHOT_LOCK});
         return termToReturn;
     }
 
@@ -1874,23 +1854,23 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     compactionFileStream.close();
     */
 
-    this->lockHandler.releaseLocks(LockName::CURR_TERM_LOCK,
-                                   LockName::TIMER_LOCK,
-                                   LockName::LOG_LOCK,
-                                   LockName::SNAPSHOT_LOCK);
+    this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
+                                    LockName::TIMER_LOCK,
+                                    LockName::LOG_LOCK,
+                                    LockName::SNAPSHOT_LOCK});
 
     return termToReturn;
 }
 
 bool
 Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std::string& clientIdentifier, const int32_t requestIdentifier) {
-    this->lockHandler.acquireLocks(LockName::LOG_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::STATE_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                   LockName::NEXT_INDEX_LOCK,
-                                   LockName::MATCH_INDEX_LOCK);
+    this->lockHandler.acquireLocks({LockName::LOG_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::STATE_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                    LockName::NEXT_INDEX_LOCK,
+                                    LockName::MATCH_INDEX_LOCK});
 
     if(this->state != ReplicaState::LEADER) {
         return false;
@@ -1898,6 +1878,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
 
     if(requestIdentifier == this->currentRequestBeingServiced) {
         #ifndef NDEBUG
+        std::stringstream msg;
         msg.str("");
         msg << "Continuing servicing of request " << requestIdentifier;
         this->logMsg(msg.str());
@@ -1932,13 +1913,13 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
         this->logMsg(msg.str());
         #endif
 
-        this->lockHandler.releaseLocks(LockName::LOG_LOCK,
-                                       LockName::CURR_TERM_LOCK,
-                                       LockName::STATE_LOCK,
-                                       LockName::COMMIT_INDEX_LOCK,
-                                       LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                       LockName::NEXT_INDEX_LOCK,
-                                       LockName::MATCH_INDEX_LOCK);
+        this->lockHandler.releaseLocks({LockName::LOG_LOCK,
+                                        LockName::CURR_TERM_LOCK,
+                                        LockName::STATE_LOCK,
+                                        LockName::COMMIT_INDEX_LOCK,
+                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                        LockName::NEXT_INDEX_LOCK,
+                                        LockName::MATCH_INDEX_LOCK});
 
         return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
     }
@@ -1983,9 +1964,9 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
         }
 
         std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
 
         std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
         std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
@@ -2007,14 +1988,14 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                 if(appendEntryResponse.term > this->currentTerm) {
                     this->state = ReplicaState::FOLLOWER;
                     this->currentTerm = appendEntryResponse.term;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                     break;
                 }
 
                 if(!appendEntryResponse.success) {
                     this->currentTerm = appendEntryResponse.term;
                     this->state = ReplicaState::FOLLOWER;
-                    this->votedFor = Replica::getNullID();
+                    this->votedFor = getNullID();
                 }
                 else {
                     ++replicationAmount;
@@ -2063,14 +2044,14 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                     if(appendEntryResponse.term > this->currentTerm) {
                         this->state = ReplicaState::FOLLOWER;
                         this->currentTerm = appendEntryResponse.term;
-                        this->votedFor = Replica::getNullID();
+                        this->votedFor = getNullID();
                         break;
                     }
 
                     if(!appendEntryResponse.success) {
                         this->currentTerm = appendEntryResponse.term;
                         this->state = ReplicaState::FOLLOWER;
-                        this->votedFor = Replica::getNullID();
+                        this->votedFor = getNullID();
                     }
                     else {
                         ++replicationAmount;
@@ -2119,60 +2100,15 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
     }
 */
 
-    this->lockHandler.releaseLocks(LockName::LOG_LOCK,
-                                   LockName::CURR_TERM_LOCK,
-                                   LockName::STATE_LOCK,
-                                   LockName::COMMIT_INDEX_LOCK,
-                                   LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                   LockName::NEXT_INDEX_LOCK,
-                                   LockName::MATCH_INDEX_LOCK);
+    this->lockHandler.releaseLocks({LockName::LOG_LOCK,
+                                    LockName::CURR_TERM_LOCK,
+                                    LockName::STATE_LOCK,
+                                    LockName::COMMIT_INDEX_LOCK,
+                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
+                                    LockName::NEXT_INDEX_LOCK,
+                                    LockName::MATCH_INDEX_LOCK});
 
     return true;
-}
-
-Entry
-Replica::getEmptyLogEntry() {
-    Entry emptyLogEntry;
-    emptyLogEntry.type = EntryType::EMPTY_ENTRY;
-    emptyLogEntry.key = "";
-    emptyLogEntry.value = "";
-    emptyLogEntry.term = -1;
-    emptyLogEntry.clientIdentifier = "";
-    emptyLogEntry.requestIdentifier = std::numeric_limits<int>::max();
-
-    return emptyLogEntry;
-}
-
-unsigned int
-Replica::getElectionTimeout() {
-    unsigned int minTimeMS = atoi(dotenv::env[Replica::MIN_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
-    unsigned int maxTimeMS = atoi(dotenv::env[Replica::MAX_ELECTION_TIMEOUT_ENV_VAR_NAME].c_str());
-
-    srand(time(0));
-
-    return (rand() % (maxTimeMS - minTimeMS)) + minTimeMS;
-}
-
-std::vector<ID>
-Replica::getMemberIDs(const std::vector<std::string>& socketAddrs) {
-    std::vector<ID> membership;
-
-    for(const std::string& addr : socketAddrs) {
-        std::stringstream ss(addr);
-        std::string host;
-        std::string portStr;
-
-        getline(ss, host, ':');
-        getline(ss, portStr, ':');
-
-        ID id;
-        id.hostname = host;
-        id.port = atoi(portStr.c_str());
-
-        membership.push_back(id);
-    }
-
-    return membership;
 }
 
 bool
@@ -2229,20 +2165,6 @@ Replica::findUpdatedCommitIndex() {
     return possibleNewCommitIndex;
 }
 
-ID
-Replica::getNullID() {
-    ID nullID;
-    nullID.hostname = "";
-    nullID.port = 0;
-
-    return nullID;
-}
-
-bool
-Replica::isANullID(const ID& id) {
-    return id.hostname == "" && id.port == 0;
-}
-
 Snapshot
 Replica::getSnapshot() {
     Snapshot newSnapshot;
@@ -2252,13 +2174,6 @@ Replica::getSnapshot() {
     for(auto const& mapping : this->stateMachine) {
         newSnapshot.mappings.push_back(mapping);
     }
-
-    #ifndef NDEBUG
-    std::stringstream msg;
-    msg << "Taking snapshot: index=" << newSnapshot.lastIncludedIndex << ", term=" <<
-                newSnapshot.lastIncludedTerm << ", " << newSnapshot.mappings;
-    this->logMsg(msg.str());
-    #endif
 
     return newSnapshot;
 }
@@ -2272,26 +2187,86 @@ ID::operator<(const ID& other) const {
     return id1.str() < id2.str();
 }
 
-int
-main(int argc, const char** argv) {
-    ArgumentParser parser;
+std::ostream&
+operator<<(std::ostream& os, const std::unordered_map<std::string, std::vector<std::string>>& stateMachine) {
+    os << "[";
+    unsigned int count = 0;
+    for(auto it = stateMachine.begin(); it != stateMachine.end(); ++it) {
+        os << it->first << "=>" << it->second.back();
+        if(count < stateMachine.size()-1) {
+            os << ", ";
+        }
+        ++count;
+    }
+    os << "]";
 
-    parser.addArgument("--listeningport", 1, false);
-    parser.addArgument("--clustermembership", '+', false);
+    return os;
+}
 
-    parser.parse(argc, argv);
+std::ostream&
+operator<<(std::ostream& os, const std::vector<Entry>& log) {
+    os << "[";
+    for(unsigned int i = 0; i < log.size(); ++i) {
+        os << log[i];
 
-    unsigned int portToUse = atoi(parser.retrieve<std::string>("listeningport").c_str());
-    std::vector<std::string> clusterMembers = parser.retrieve<std::vector<std::string>>("clustermembership");
+        if(i < log.size()-1) {
+            os << ", ";
+        }
+    }
+    os << "]";
 
-    std::shared_ptr<Replica> handler(new Replica(portToUse, clusterMembers));
-    std::shared_ptr<apache::thrift::TProcessor> processor(new ReplicaServiceProcessor(handler));
-    std::shared_ptr<apache::thrift::transport::TServerTransport> serverTransport(new apache::thrift::transport::TServerSocket(portToUse));
-    std::shared_ptr<apache::thrift::transport::TTransportFactory> transportFactory(new apache::thrift::transport::TBufferedTransportFactory());
-    std::shared_ptr<apache::thrift::protocol::TProtocolFactory> protocolFactory(new apache::thrift::protocol::TBinaryProtocolFactory());
+    return os;
+}
 
-    apache::thrift::server::TThreadedServer server(processor, serverTransport, transportFactory, protocolFactory);
-    server.serve();
+std::ostream&
+operator<<(std::ostream& os, const ReplicaState& state) {
+    switch(state) {
+        case ReplicaState::LEADER:
+            os << "LEADER";
+            break;
+        case ReplicaState::CANDIDATE:
+            os << "CANDIDATE";
+            break;
+        case ReplicaState::FOLLOWER:
+            os << "FOLLOWER";
+            break;
+    };
 
-    return 0;
+    return os;
+}
+
+std::ostream&
+operator<<(std::ostream& os, const Snapshot& snapshot) {
+    os << snapshot.lastIncludedIndex << snapshot.lastIncludedTerm;
+
+    for(auto const& mapping : snapshot.mappings) {
+        os << mapping.first << '\n' << mapping.second.back() << '\n';
+    }
+
+    return os;
+}
+
+std::istream&
+operator>>(std::istream& is, Snapshot& snapshot) {
+    int lastIncludedIndex,
+        lastIncludedTerm;
+
+    is >> lastIncludedIndex >> lastIncludedTerm;
+
+    snapshot.lastIncludedIndex = lastIncludedIndex;
+    snapshot.lastIncludedTerm = lastIncludedTerm;
+
+    /*
+    while(is) {
+        std::string key, value;
+        is >> key >> value;
+
+        std::stack<std::string>> valueStack;
+        valueStack.push(value);
+
+        snapshot.mappings.push_back({key, value});
+    }
+    */
+
+    return is;
 }
