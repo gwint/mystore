@@ -3,13 +3,13 @@
 import argparse
 from sys import argv, exit, path
 from os import getenv, path as ospath
-from random import randrange, seed
+from random import randrange, seed, choice
 import logging
 from socket import gethostname, gethostbyname, timeout
 from time import sleep
 import traceback
 
-path.append('gen-py')
+path.append('external-projs/gen-py')
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
@@ -18,12 +18,10 @@ from thrift.server import TServer
 from dotenv import load_dotenv
 
 REQUEST_IDENTIFIER_ENV_VAR_NAME = "REQUEST_ID_FILE"
-MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME = "CURRENT_LEADER_INFO_FILE"
 RPC_TIMEOUT_ENV_VAR_NAME = "CMD_LINE_TOOL_TIMEOUT_MS"
 NUM_REQUEST_RETRIES_ENV_VAR_NAME = "CMD_LINE_TOTAL_NUM_RETRIES_PER_REQUEST"
 REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME = "CMD_LINE_TOOL_REST_PERIOD_BETWEEN_CALLS_MS"
 NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME = "CMD_LINE_TOOL_NUM_REQUEST_RETRY_CYCLES_BEFORE_QUITTING"
-CLUSTER_MEMBERSHIP_FILE_NAME_ENV_VAR_NAME = "CLUSTER_MEMBERSHIP_FILE"
 
 from replicaservice import ReplicaService, ttypes
 
@@ -54,16 +52,24 @@ class InformationRetrievalFailureException(Exception):
 
 ttypes.ID.__hash__ = lambda self: hash((self.hostname, self.port))
 
+
 def isNullID(id):
     return (not id.hostname) and id.port == 0
 
-def killReplica(url):
-    if ':' not in url or list(url).count(':') != 1:
-        print(f'Cannot kill replica at {url}: Invalid format (should be <host>:<port>)')
-        exit(1)
 
-    host, portStr = tuple(url.split(':'))
+def getSocketAddr(socketAddrStr):
+    if ':' not in socketAddrStr or socketAddrStr.count(':') != 1:
+        print(f'{socketAddrStr}: Invalid format (should be <host>:<port>)')
+        raise ValueError()
+
+    host, portStr = tuple(socketAddrStr.strip().split(':'))
     port = int(portStr)
+
+    return (host, port)
+
+
+def killReplica(url):
+    host, port = getSocketAddr(url)
 
     transport = TSocket.TSocket(host, port)
     transport = TTransport.TBufferedTransport(transport)
@@ -83,28 +89,15 @@ def killReplica(url):
     except TTransport.TTransportException as e:
         logger.debug(f'Experienced error while setting up connection to attempt to kill replica at ({host}:{port})')
 
-def listClusterMembers(isTableUsed, target=""):
+
+def listClusterMembers(isTableUsed, clustermembership):
     clusterInfo = {}
-
-    leaderInfo = getLeaderInfo()
-
-    if not leaderInfo:
-        try:
-            leaderInfo = getRandomReplica()
-        except NoTargetFoundException as e:
-            if not target:
-                raise e
-
-            addNewReplicaToMembershipFile(target)
-            leaderInfo = target.split(':')
-            leaderInfo[1] = int(leaderInfo[1])
-            leaderInfo = tuple(leaderInfo)
 
     numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
     numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
     pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
 
-    host, port = leaderInfo
+    host, port = choice(clustermembership)
 
     for cycleNum in range(numCyclesBeforeQuitting):
         logger.debug(f'Now entering cycle {cycleNum} for MEMBERS request')
@@ -125,7 +118,6 @@ def listClusterMembers(isTableUsed, target=""):
 
                     if informationResponse.success:
                         logger.debug(f'MEMBERS request successfully resolved')
-                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
 
                         displayClusterInfoInTable(informationResponse.clusterInformation) if isTableUsed else displayClusterInfoWithCommaSep(informationResponse.clusterInformation)
 
@@ -133,7 +125,7 @@ def listClusterMembers(isTableUsed, target=""):
 
                     elif isNullID(informationResponse.leaderID):
                         logger.debug(f'MEMBERS request unsuccessful and current leader is unknown')
-                        host, port = getRandomReplica()
+                        host, port = choice(clustermembership)
                     else:
                         logger.debug(f'MEMBERS request unsuccessful')
                         host = informationResponse.leaderID.hostname
@@ -145,11 +137,12 @@ def listClusterMembers(isTableUsed, target=""):
 
             except TTransport.TTransportException as e:
                 logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
-                host, port = getRandomReplica()
+                host, port = choice(clustermembership)
 
             sleep((pauseDurationAfterRetryMS / 1000) * 2)
 
     raise InformationRetrievalFailureException()
+
 
 def displayClusterInfoInTable(clusterInfo):
     print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
@@ -166,6 +159,7 @@ def displayClusterInfoInTable(clusterInfo):
 
     print("+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+" + ("-" * 23) + "+")
 
+
 def displayClusterInfoWithCommaSep(clusterInfo):
     count = 0
     for endpoint, replicaInformation in clusterInfo.items():
@@ -181,33 +175,22 @@ def displayClusterInfoWithCommaSep(clusterInfo):
 
     print()
 
-def delKey(key, target=""):
+
+def delKey(key, clustermembership):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
 
-    return delKeyHelper(key, hostIP, nextRequestIdentifier, target)
+    return delKeyHelper(key, hostIP, nextRequestIdentifier, clustermembership)
 
-def delKeyHelper(key, clientIdentifier, requestNumber, target):
-    leaderInfo = getLeaderInfo()
-
-    if not leaderInfo:
-        try:
-            leaderInfo = getRandomReplica()
-        except NoTargetFoundException as e:
-            if not target:
-                raise e
-
-            addNewReplicaToMembershipFile(target)
-            leaderInfo = target.split(':')
-            leaderInfo[1] = int(leaderInfo[1])
-            leaderInfo = tuple(leaderInfo)
+ 
+def delKeyHelper(key, clientIdentifier, requestNumber, clustermembership):
 
     numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
     numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
     pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
 
     currentRequestNumber = requestNumber
-    host, port = leaderInfo
+    host, port = choice(clustermembership)
 
     for cycleNum in range(numCyclesBeforeQuitting):
         logger.debug(f'Now entering cycle {cycleNum} for DEL request')
@@ -229,14 +212,13 @@ def delKeyHelper(key, clientIdentifier, requestNumber, target):
 
                     if response.success:
                         logger.debug(f'DEL request successfully resolved')
-                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
                         setNextRequestIdentifier(currentRequestNumber + 1)
 
                         return True
 
                     elif isNullID(response.leaderID):
                         logger.debug(f'DEL request unsuccessful and current leader is unknown')
-                        host, port = getRandomReplica()
+                        host, port = choice(clustermembership)
                     else:
                         logger.debug(f'DEL request unsuccessful')
                         host = response.leaderID.hostname
@@ -248,7 +230,7 @@ def delKeyHelper(key, clientIdentifier, requestNumber, target):
 
             except TTransport.TTransportException as e:
                 logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
-                host, port = getRandomReplica()
+                host, port = choice(clustermembership)
 
             sleep((pauseDurationAfterRetryMS / 1000) * 2)
 
@@ -256,32 +238,22 @@ def delKeyHelper(key, clientIdentifier, requestNumber, target):
 
     raise DelFailureException()
 
-def get(key, numPastMappings, target=""):
+
+def get(key, numPastMappings, clustermembership):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
 
-    return getHelper(key, hostIP, nextRequestIdentifier, numPastMappings, target)
+    return getHelper(key, hostIP, nextRequestIdentifier, numPastMappings, clustermembership)
 
-def getHelper(key, clientIdentifier, requestNumber, numPastMappings, target):
-    leaderInfo = getLeaderInfo()
-    if not leaderInfo:
-        try:
-            leaderInfo = getRandomReplica()
-        except NoTargetFoundException as e:
-            if not target:
-                raise e
 
-            addNewReplicaToMembershipFile(target)
-            leaderInfo = target.split(':')
-            leaderInfo[1] = int(leaderInfo[1])
-            leaderInfo = tuple(leaderInfo)
+def getHelper(key, clientIdentifier, requestNumber, numPastMappings, clustermembership):
 
     numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
     numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
     pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
 
     currentRequestNumber = requestNumber
-    host, port = leaderInfo
+    host, port = choice(clustermembership)
 
     for cycleNum in range(numCyclesBeforeQuitting):
         for retryNum in range(numRetriesBeforeChangingRequestID):
@@ -301,14 +273,13 @@ def getHelper(key, clientIdentifier, requestNumber, numPastMappings, target):
 
                     if response.success:
                         logger.debug(f'GET request successfully resolved: {response.values} is the value retreived')
-                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
                         setNextRequestIdentifier(currentRequestNumber + 1)
 
                         return response.values
 
                     elif isNullID(response.leaderID):
                         logger.debug(f'GET request unsuccessful and current leader is unknown')
-                        host, port = getRandomReplica()
+                        host, port = choice(clustermembership)
                     else:
                         logger.debug(f'GET request unsuccessful')
                         host = response.leaderID.hostname
@@ -320,7 +291,7 @@ def getHelper(key, clientIdentifier, requestNumber, numPastMappings, target):
 
             except TTransport.TTransportException as e:
                 logger.debug(f'Experienced error while creating connection to contact ({host}:{port}) to resolve GET')
-                host, port = getRandomReplica()
+                host, port = choice(clustermembership)
 
             sleep(pauseDurationAfterRetryMS / 1000)
 
@@ -328,32 +299,22 @@ def getHelper(key, clientIdentifier, requestNumber, numPastMappings, target):
 
     raise GetFailureException()
 
-def put(key, value, target=""):
+
+def put(key, value, clustermembership):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
 
-    return putHelper(key, value, hostIP, nextRequestIdentifier, target)
+    return putHelper(key, value, hostIP, nextRequestIdentifier, clustermembership)
 
-def putHelper(key, value, clientIdentifier, requestNumber, target):
-    leaderInfo = getLeaderInfo()
-    if not leaderInfo:
-        try:
-            leaderInfo = getRandomReplica()
-        except NoTargetFoundException as e:
-            if not target:
-                raise e
 
-            addNewReplicaToMembershipFile(target)
-            leaderInfo = target.split(':')
-            leaderInfo[1] = int(leaderInfo[1])
-            leaderInfo = tuple(leaderInfo)
+def putHelper(key, value, clientIdentifier, requestNumber, clustermembership):
 
     numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
     numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
     pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
 
     currentRequestNumber = requestNumber
-    host, port = leaderInfo
+    host, port = choice(clustermembership)
 
     for cycleNum in range(numCyclesBeforeQuitting):
         logger.debug(f'Now entering cycle {cycleNum} for PUT request')
@@ -375,7 +336,6 @@ def putHelper(key, value, clientIdentifier, requestNumber, target):
 
                     if response.success:
                         logger.debug(f'PUT request successfully resolved: {key} => {value}')
-                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
                         setNextRequestIdentifier(currentRequestNumber + 1)
 
                         return True
@@ -387,8 +347,6 @@ def putHelper(key, value, clientIdentifier, requestNumber, target):
                         logger.debug(f'PUT request unsuccessful')
                         host = response.leaderID.hostname
                         port = response.leaderID.port
-
-                        addNewReplicaToMembershipFile(f'{host}:{port}')
 
                 except TTransport.TTransportException as e:
                     if isinstance(e.inner, timeout):
@@ -404,36 +362,28 @@ def putHelper(key, value, clientIdentifier, requestNumber, target):
 
     raise PutFailureException()
 
-def addNewConfiguration(newSocketAddrLst, target=""):
+
+def addNewConfiguration(newSocketAddrLst, clustermembership):
     nextRequestIdentifier = getNextRequestIdentifier()
     hostIP = gethostbyname(gethostname())
+    ids = list(map(lambda sockAddr : ttypes.ID(hostname = sockAddr[:sockAddr.index(':')], port = int(sockAddr[sockAddr.index(':')+1:])), newSocketAddrLst))
+    return addNewConfigurationHelper(ids, hostIP, nextRequestIdentifier, clustermembership)
 
-    return addNewConfigurationHelper(newSocketAddrLst, hostIP, nextRequestIdentifier, target)
 
-def addNewConfigurationHelper(newSocketAddrLst, clientIdentifier, requestNumber, target):
-    leaderInfo = getLeaderInfo()
-    if not leaderInfo:
-        try:
-            leaderInfo = getRandomReplica()
-        except NoTargetFoundException as e:
-            if not target:
-                raise e
-
-            addNewReplicaToMembershipFile(target)
-            leaderInfo = target.split(':')
-            leaderInfo[1] = int(leaderInfo[1])
-            leaderInfo = tuple(leaderInfo)
+def addNewConfigurationHelper(newSocketAddrLst, clientIdentifier, requestNumber, clustermembership):
 
     numCyclesBeforeQuitting = int(getenv(NUM_RETRY_CYCLES_BEFORE_QUITTING_ENV_VAR_NAME))
     numRetriesBeforeChangingRequestID = int(getenv(NUM_REQUEST_RETRIES_ENV_VAR_NAME))
     pauseDurationAfterRetryMS = int(getenv(REST_PERIOD_BETWEEN_CALLS_ENV_VAR_NAME))
 
     currentRequestNumber = requestNumber
-    host, port = leaderInfo
+    host, port = choice(clustermembership)
 
     for cycleNum in range(numCyclesBeforeQuitting):
         logger.debug(f'Now entering cycle {cycleNum} for NEWCONFIG request')
+        print("looping")
         for retryNum in range(numRetriesBeforeChangingRequestID):
+            print("looping inner")
             logger.debug(f'Request Identifier {currentRequestNumber} being used for NEWCONFIG attempt {retryNum}')
             transport = TSocket.TSocket(host, port)
             transport.setTimeout(int(getenv(RPC_TIMEOUT_ENV_VAR_NAME)))
@@ -451,14 +401,13 @@ def addNewConfigurationHelper(newSocketAddrLst, clientIdentifier, requestNumber,
 
                     if response.success:
                         logger.debug(f'NEWCONFIG request successfully resolved')
-                        open(getenv(MOST_RECENT_LEADER_ADDR_ENV_VAR_NAME), 'w').write(f'{host}:{port}')
                         setNextRequestIdentifier(currentRequestNumber + 1)
 
                         return True
 
                     elif isNullID(response.leaderID):
                         logger.debug(f'NEWCONFIG request unsuccessful and current leader is unknown')
-                        host, port = getRandomReplica()
+                        host, port = choice(clustermembership)
                     else:
                         logger.debug(f'NEWCONFIG request unsuccessful')
                         host = response.leaderID.hostname
@@ -472,108 +421,32 @@ def addNewConfigurationHelper(newSocketAddrLst, clientIdentifier, requestNumber,
                 logger.debug(f'Experienced transport error while contacting ({host}:{port}): {str(e)}')
                 host, port = getRandomReplica()
 
+            print("now sleeping")
             sleep((pauseDurationAfterRetryMS / 1000) * 2)
 
         currentRequestNumber += 1
 
     raise ConfigurationInstallationException()
 
-def getLeaderInfo():
-    if ospath.exists(getenv("CURRENT_LEADER_INFO_FILE")):
-        leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'r')
-        leaderAddr = leaderInfoFileObj.read().strip()
-        if not leaderAddr:
-            return ()
-        if ':' not in leaderAddr or list(leaderAddr).count(':') > 1:
-            raise ValueError(f'{getenv("CURRENT_LEADER_INFO_FILE")} containing leader information is ill-formed: should have single line of the form <host>:<port>; {leaderAddr} does not comply.')
-
-        return tuple(leaderAddr.split(':'))
-
-    else:
-        leaderInfoFileObj = open(getenv("CURRENT_LEADER_INFO_FILE"), 'w')
-        randomHost, randomPort = getRandomReplica()
-        leaderInfoFileObj.write(f'{randomHost}:{randomPort}\n')
-
-        return (randomHost, randomPort)
-
-def addNewReplicaToMembershipFile(newSocketAddr):
-    currentMembership = set()
-
-    if ospath.exists(getenv("CLUSTER_MEMBERSHIP_FILE")):
-        with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r') as clusterMembershipFileObj:
-            socketAddr = clusterMembershipFileObj.readline()
-            while socketAddr:
-                currentMembership.add(socketAddr.strip())
-                socketAddr = clusterMembershipFileObj.readline()
-
-    currentMembership.add(newSocketAddr)
-
-    with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'w') as clusterMembershipFileObj:
-        for socketAddr in currentMembership:
-            clusterMembershipFileObj.write(socketAddr + '\n')
-
-def removeReplicaFromMembershipFile(socketAddrToRemove):
-    currentMembership = set()
-    with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r') as clusterMembershipFileObj:
-        socketAddr = clusterMembershipFileObj.readline()
-        while socketAddr:
-            currentMembership.add(socketAddr)
-            socketAddr = clusterMembershipFileObj.readline()
-
-    if socketAddrToRemove not in currentMembership:
-        return
-
-    currentMembership.remove(socketAddrToRemove)
-
-    with open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'w') as clusterMembershipFileObj:
-        for socketAddr in currentMembership:
-            clusterMembershipFileObj.write(socketAddr + '\n')
-
-def getRandomReplica():
-    if not ospath.exists("CLUSTER_MEMBERSHIP_FILE"):
-        raise NoTargetFoundException()
-
-    seed()
-
-    replicaInfoFileObj = open(getenv("CLUSTER_MEMBERSHIP_FILE"), 'r')
-
-    replicaInfo = []
-
-    line = replicaInfoFileObj.readline()
-    while line:
-        line = line.strip()
-        if not line:
-            raise ValueError(f'{getenv("CLUSTER_MEMBERSHIP_FILE")} is ill-formed: each line shoudl be of the form <host>:<port>; {line} does not comply.')
-        if ':' not in line or list(line).count(':') > 1:
-            raise ValueError(f'{getenv("CLUSTER_MEMBERSHIP_FILE")} is ill-formed: the file must not be empty')
-
-        host, portStr = tuple(line.strip().split(':'))
-        port = int(portStr)
-
-        replicaInfo.append((host, port))
-
-        line = replicaInfoFileObj.readline()
-
-    replicaInfoFileObj.close()
-
-    return replicaInfo[randrange(len(replicaInfo))]
 
 def getNextRequestIdentifier():
     if not ospath.exists(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME)):
         with open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w') as nextIdentifierFileObj:
             nextIdentifierFileObj.write("0")
 
-    nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME))
-    nextIdentifierStr = nextIdentifierFileObj.read().strip()
+    with open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME)) as nextIdentifierFileObj:
+        nextIdentifierStr = nextIdentifierFileObj.read().strip()
+        return int(nextIdentifierStr)
 
-    return int(nextIdentifierStr)
 
 def setNextRequestIdentifier(nextIdentifier):
-    nextIdentifierFileObj = open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w')
-    nextIdentifierStr = str(nextIdentifier)
-    nextIdentifierFileObj.write(nextIdentifierStr)
+    with open(getenv(REQUEST_IDENTIFIER_ENV_VAR_NAME), 'w') as nextIdentifierFileObj:
+        nextIdentifierStr = str(nextIdentifier)
+        nextIdentifierFileObj.write(nextIdentifierStr)
+
 
 if __name__ == "__main__":
+
     load_dotenv()
 
     parser = argparse.ArgumentParser(prog=f'{argv[0]}')
@@ -583,64 +456,55 @@ if __name__ == "__main__":
     killParser.add_argument("url", help="<host>:<port>")
 
     membersParser = subparsers.add_parser("members", help="Used to list state of current cluster members")
+    membersParser.add_argument("clustermembership", nargs="+", help="IP address / port number pairs for cluster members.  Should have the form <ip addr>:<port number>.")
     membersParser.add_argument("-table", action="store_true")
-    membersParser.add_argument("-target", default="", help="Socket address of the replica to send initial request to")
 
     putParser = subparsers.add_parser("put", help="Used to create or update a key-value pair")
     putParser.add_argument("key", help="To be used as a key for the mapping")
     putParser.add_argument("value", help="To be used as a value for the mapping")
-    putParser.add_argument("-target", default="", help="Socket address of the replica to send initial request to")
+    putParser.add_argument("clustermembership", nargs="+", help="IP address / port number pairs for cluster members.  Should have the form <ip addr>:<port number>.")
 
     getParser = subparsers.add_parser("get", help="Used to read value associated with a given key")
     getParser.add_argument("key", help="Key whose associated value will be retreived")
+    getParser.add_argument("clustermembership", nargs="+", help="IP address / port number pairs for cluster members.  Should have the form <ip addr>:<port number>.")
     getParser.add_argument("-rev", nargs="?", type=int, default=0)
-    getParser.add_argument("-target", default="", help="Socket address of the replica to send initial request to")
 
     delKeyParser = subparsers.add_parser("del", help="Used to remove a given key from the cluster")
     delKeyParser.add_argument("key", help="Key to be removed from the cluster")
-    delKeyParser.add_argument("-target", default="", help="Socket address of the replica to send initial request to")
+    delKeyParser.add_argument("clustermembership", nargs="+", help="IP address / port number pairs for cluster members.  Should have the form <ip addr>:<port number>.")
 
     newConfigParser = subparsers.add_parser("newconfig", help="Used to change the configuration of the cluster")
-    newConfigParser.add_argument("socketaddresses", nargs="+", help="IP address / port number pairs for machines included in the new cluster configuration.  Should have the form <ip addr>:<port number>.")
-    newConfigParser.add_argument("-target", default="", help="Socket address of the replica to send initial request to")
+    newConfigParser.add_argument("newclustermembership", nargs="+", help="IP address / port number pairs for machines included in the new cluster configuration.  Should have the form <ip addr>:<port number>.")
+    newConfigParser.add_argument("clustermembership", nargs="+", help="IP address / port number pairs for cluster members.  Should have the form <ip addr>:<port number>.")
 
     args = parser.parse_args()
+
+    clustermembership = []
+    if args.clustermembership:
+      clustermembership = [getSocketAddr(member) for member in args.clustermembership]
 
     if args.command == "kill":
         killReplica(args.url)
     elif args.command == "members":
         try:
-            listClusterMembers(args.table, args.target)
+            listClusterMembers(args.table, clustermembership)
         except InformationRetrievalFailureException:
-            print()
-        except NoTargetFoundException:
-            print("MEMBERS request failed because no target could be found: Please specify -target in the command")
+            print("MEMBERS Request Failed")
     elif args.command == "put":
         try:
-            print(put(args.key, args.value, args.target))
+            print(put(args.key, args.value, clustermembership))
         except PutFailureException:
             print("PUT Request Failed")
-        except NoTargetFoundException:
-            print("PUT request failed because no target could be found: Please specify -target in the command")
     elif args.command == "get":
         try:
-            for val in get(args.key, args.rev, args.target):
+            for val in get(args.key, args.rev, clustermembership):
                 print(val)
         except GetFailureException:
             print("GET Request Failed")
-        except NoTargetFoundException:
-            print("GET request failed because no target could be found: Please specify -target in the command")
-    elif args.command == "del":
-        try:
-            print(delKey(args.key, args.target))
-        except NoTargetFoundException:
-            print("DEL request failed because no target could be found: Please specify -target in the command")
     elif args.command == "newconfig":
         try:
-            print(addNewConfiguration(args.socketaddresses, args.target))
-        except NoTargetFoundException:
-            print("NEWCONFIG request failed because no target could be found: Please specify -target in the command")
+            print(addNewConfiguration(args.socketaddresses, clustermembership))
         except ConfigurationInstallationException:
             print("Configuration Installation Failed")
     else:
-        parser.error("No command provided: must be one of (kill, members, put, get)")
+        parser.error("No command provided: must be one of (kill, members, put, get, newconfig)")
