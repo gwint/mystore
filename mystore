@@ -490,6 +490,11 @@ if __name__ == "__main__":
             listClusterMembers(args.table, clustermembership)
         except InformationRetrievalFailureException:
             print("MEMBERS Request Failed")
+    elif args.command == "del":
+        try:
+            print(delKey(args.key, clustermembership))
+        except DelFailureException:
+            print("DEL Request Failed")
     elif args.command == "put":
         try:
             print(put(args.key, args.value, clustermembership))
