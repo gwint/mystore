@@ -89,6 +89,8 @@ class Replica : virtual public ReplicaServiceIf {
 
         Snapshot getSnapshot();
 
+        ReplicaServiceClient getServiceClient(const std::string&, int);
+
     public:
         Replica(unsigned int, const std::vector<std::string>&);
 
@@ -100,7 +102,7 @@ class Replica : virtual public ReplicaServiceIf {
         void getInformationHelper(GetInformationHelperResponse &, const int32_t);
         void getInformation(GetInformationResponse &);
         int32_t installSnapshot(const int32_t, const ID&, const int32_t, const int32_t, const int32_t, const std::string&, const bool);
-        bool addNewConfiguration(const std::vector<ID> &, const std::string&, const int32_t);
+        void addNewConfiguration(AddConfigResponse&, const std::vector<ID> &, const std::string&, const int32_t);
         void deletekey(DelResponse&, const std::string&, const std::string&, const int32_t);
 
         void timer();
