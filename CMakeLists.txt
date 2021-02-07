@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(ServerFiles driver.cpp)
 set(TestFiles tests/test_replica.cpp)
-set(HelperFiles replica.cpp lockhandler.cpp utils.cpp constants.cpp)
+set(HelperFiles replica.cpp utils.cpp constants.cpp)
 set(external-proj-dir external-projs)
 
 configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)

@@ -10,8 +10,6 @@
 #include <functional>
 #include <sstream>
 
-#include "lockhandler.hpp"
-
 #include "replicaservice_types.h"
 #include "ReplicaService.h"
 
@@ -69,7 +67,6 @@ class Replica : virtual public ReplicaServiceIf {
         bool hasOperationStarted;
         std::vector<ID> clusterMembership;
         std::set<ID> nonVotingMembers;
-        LockHandler lockHandler;
         std::shared_ptr<spdlog::logger> logger;
         int noopIndex;
         std::thread timerThr;

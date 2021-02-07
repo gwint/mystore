@@ -13,8 +13,6 @@
 #include <stdexcept>
 
 #include "replica.hpp"
-#include "lockhandler.hpp"
-#include "locknames.hpp"
 #include "utils.hpp"
 
 #include "dotenv.h"
@@ -56,7 +54,6 @@ Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocke
           currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
           hasOperationStarted(false),
           clusterMembership(getMemberIDs(clusterSocketAddrs)),
-          lockHandler(16),
           noopIndex(0),
 	  willingToVote(true) {
 
@@ -85,22 +82,15 @@ Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocke
     this->currentSnapshot.lastIncludedIndex = 0;
     this->currentSnapshot.lastIncludedTerm = -1;
 
-    this->timerThr = std::thread(&Replica::timer, this);
-    this->heartbeatSenderThr = std::thread(&Replica::heartbeatSender, this);
-    this->retryThr = std::thread(&Replica::retryRequest, this);
+//    this->timerThr = std::thread(&Replica::timer, this);
+//    this->heartbeatSenderThr = std::thread(&Replica::heartbeatSender, this);
+//    this->retryThr = std::thread(&Replica::retryRequest, this);
 }
 
 void
 Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID, const int32_t lastLogIndex, const int32_t lastLogTerm) {
     int ballotTerm = -1;
     bool voteGranted = false;
-
-    this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::STATE_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::WILLING_TO_VOTE_LOCK});
 
     LOG_INFO(candidateID << " is requesting my vote.");
 
@@ -122,13 +112,6 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
         this->votedFor = candidateID;
     }
 
-    this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::STATE_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::WILLING_TO_VOTE_LOCK});
-
     _return.voteGranted = voteGranted;
     _return.term = ballotTerm;
 }
@@ -137,18 +120,6 @@ void
 Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID& leaderID, const int32_t prevLogIndex, const int32_t prevLogTerm, const Entry& entry, const int32_t leaderCommit) {
 
     _return.success = true;
-
-    this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::STATE_LOCK,
-                                    LockName::LAST_APPLIED_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::MAP_LOCK,
-                                    LockName::TIMER_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                    LockName::WILLING_TO_VOTE_LOCK});
 
     LOG_INFO(leaderID << " is appending " << entry << " to my log.");
 
@@ -168,18 +139,6 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
         _return.success = false;
         _return.term = std::max(term, this->currentTerm);
         this->currentTerm = std::max(term, this->currentTerm);
-
-        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::STATE_LOCK,
-                                        LockName::LAST_APPLIED_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::MAP_LOCK,
-                                        LockName::TIMER_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                        LockName::WILLING_TO_VOTE_LOCK});
 
         return;
     }
@@ -246,18 +205,6 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
     this->leader = leaderID;
     this->currentTerm = std::max(term, this->currentTerm);
     _return.term = this->currentTerm;
-
-    this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::STATE_LOCK,
-                                    LockName::LAST_APPLIED_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::MAP_LOCK,
-                                    LockName::TIMER_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                    LockName::WILLING_TO_VOTE_LOCK});
 }
 
 ReplicaServiceClient
@@ -285,17 +232,6 @@ void
 Replica::get(GetResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier, const int32_t numPastMappings) {
     _return.success = true;
 
-    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::MATCH_INDEX_LOCK,
-                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
     LOG_INFO(this->myID << " now attempting to retrieve value associated with " << key);
 
     if(this->state != ReplicaState::LEADER) {
@@ -306,17 +242,6 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
-
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::LATEST_NO_OP_LOG_INDEX,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -353,17 +278,6 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
 
                 LOG_INFO("Early exit: Larger term encountered");
 
-                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                LockName::LEADER_LOCK,
-                                                LockName::CURR_TERM_LOCK,
-                                                LockName::LOG_LOCK,
-                                                LockName::COMMIT_INDEX_LOCK,
-                                                LockName::VOTED_FOR_LOCK,
-                                                LockName::MATCH_INDEX_LOCK,
-                                                LockName::LATEST_NO_OP_LOG_INDEX,
-                                                LockName::SNAPSHOT_LOCK,
-                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
-
                 return;
             }
 
@@ -371,17 +285,6 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                 _return.success = false;
 
                 LOG_INFO("Early exit: appendEntryResponse not successful");
-
-                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                LockName::LEADER_LOCK,
-                                                LockName::CURR_TERM_LOCK,
-                                                LockName::LOG_LOCK,
-                                                LockName::COMMIT_INDEX_LOCK,
-                                                LockName::VOTED_FOR_LOCK,
-                                                LockName::MATCH_INDEX_LOCK,
-                                                LockName::LATEST_NO_OP_LOG_INDEX,
-                                                LockName::SNAPSHOT_LOCK,
-                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                 return;
             }
@@ -404,17 +307,6 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         _return.success = false;
 
         LOG_INFO("Early exit: replication level needed not reached");
-
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::LATEST_NO_OP_LOG_INDEX,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -441,34 +333,10 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
             _return.values.push_back("");
         }
     }
-
-    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::MATCH_INDEX_LOCK,
-                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
 }
 
 void
 Replica::deletekey(DelResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier) {
-    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::NEXT_INDEX_LOCK,
-                                    LockName::LAST_APPLIED_LOCK,
-                                    LockName::MATCH_INDEX_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
     _return.success = true;
 
     LOG_INFO(this->myID << " now attempting to delete " << key);
@@ -480,18 +348,6 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
-
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::LAST_APPLIED_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -522,18 +378,6 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
         LOG_INFO("Is this entry from this term? = " << entryIsFromCurrentTerm);
         LOG_INFO("Has the entry been successfully replicated on a majority of replicas " << areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex));
-
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::LAST_APPLIED_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -578,18 +422,6 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                 this->state = ReplicaState::FOLLOWER;
                 this->votedFor = getNullID();
                 _return.success = false;
-
-                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                LockName::LEADER_LOCK,
-                                                LockName::CURR_TERM_LOCK,
-                                                LockName::LOG_LOCK,
-                                                LockName::COMMIT_INDEX_LOCK,
-                                                LockName::VOTED_FOR_LOCK,
-                                                LockName::NEXT_INDEX_LOCK,
-                                                LockName::LAST_APPLIED_LOCK,
-                                                LockName::MATCH_INDEX_LOCK,
-                                                LockName::SNAPSHOT_LOCK,
-                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                 return;
             }
@@ -642,35 +474,11 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         this->lastApplied = this->log.size()-1;
     }
 
-    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::NEXT_INDEX_LOCK,
-                                    LockName::LAST_APPLIED_LOCK,
-                                    LockName::MATCH_INDEX_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
     return;
 }
 
 void
 Replica::put(PutResponse& _return, const std::string& key, const std::string& value, const std::string& clientIdentifier, const int32_t requestIdentifier) {
-    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::NEXT_INDEX_LOCK,
-                                    LockName::LAST_APPLIED_LOCK,
-                                    LockName::MATCH_INDEX_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
     _return.success = true;
 
     LOG_INFO(this->myID << " now attempting to associate " << key << " with " << value);
@@ -682,18 +490,6 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
-
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::LAST_APPLIED_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -724,18 +520,6 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
         LOG_INFO("Is this entry from this term? = " << entryIsFromCurrentTerm);
         LOG_INFO("Has the entry been successfully replicated on a majority of replicas " << areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex));
-
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::LAST_APPLIED_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
 
         return;
     }
@@ -781,18 +565,6 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                 this->state = ReplicaState::FOLLOWER;
                 this->votedFor = getNullID();
                 _return.success = false;
-
-                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                LockName::LEADER_LOCK,
-                                                LockName::CURR_TERM_LOCK,
-                                                LockName::LOG_LOCK,
-                                                LockName::COMMIT_INDEX_LOCK,
-                                                LockName::VOTED_FOR_LOCK,
-                                                LockName::NEXT_INDEX_LOCK,
-                                                LockName::LAST_APPLIED_LOCK,
-                                                LockName::MATCH_INDEX_LOCK,
-                                                LockName::SNAPSHOT_LOCK,
-                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
                 return;
             }
@@ -849,18 +621,6 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         this->lastApplied = this->log.size()-1;
     }
 
-    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                    LockName::LEADER_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::VOTED_FOR_LOCK,
-                                    LockName::NEXT_INDEX_LOCK,
-                                    LockName::LAST_APPLIED_LOCK,
-                                    LockName::MATCH_INDEX_LOCK,
-                                    LockName::SNAPSHOT_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
     return;
 }
 
@@ -905,11 +665,6 @@ Replica::getInformationHelper(GetInformationHelperResponse & _return, const int3
 
 void
 Replica::getInformation(GetInformationResponse& _return) {
-    this->lockHandler.acquireLocks({LockName::STATE_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                    LockName::LEADER_LOCK});
-
     _return.success = true;
 
     if(this->state != ReplicaState::LEADER) {
@@ -917,11 +672,6 @@ Replica::getInformation(GetInformationResponse& _return) {
         if(!isANullID(this->leader)) {
             _return.leaderID = this->leader;
         }
-
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                        LockName::LEADER_LOCK});
 
         return;
     }
@@ -961,11 +711,6 @@ Replica::getInformation(GetInformationResponse& _return) {
                 this->votedFor = getNullID();
                 _return.success = false;
 
-                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                LockName::LEADER_LOCK,
-                                                LockName::CURR_TERM_LOCK,
-                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
-
                 return;
             }
 
@@ -980,11 +725,6 @@ Replica::getInformation(GetInformationResponse& _return) {
             _return.clusterInformation[id]["index"] = "N/A";
         }
     }
-
-    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                    LockName::LEADER_LOCK});
 }
 
 void
@@ -996,33 +736,7 @@ Replica::timer() {
     std::stringstream msg;
 
     while(true) {
-        this->lockHandler.acquireLocks({LockName::STATE_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::TIMER_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                        LockName::WILLING_TO_VOTE_LOCK});
-
         if(this->state == ReplicaState::LEADER) {
-            this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                            LockName::LOG_LOCK,
-                                            LockName::CURR_TERM_LOCK,
-                                            LockName::TIMER_LOCK,
-                                            LockName::COMMIT_INDEX_LOCK,
-                                            LockName::VOTED_FOR_LOCK,
-                                            LockName::LEADER_LOCK,
-                                            LockName::NEXT_INDEX_LOCK,
-                                            LockName::MATCH_INDEX_LOCK,
-                                            LockName::SNAPSHOT_LOCK,
-                                            LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                            LockName::WILLING_TO_VOTE_LOCK});
-
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             continue;
         }
@@ -1147,19 +861,6 @@ Replica::timer() {
 	    this->willingToVote = true;
 	} 
 
-        this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::TIMER_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::LEADER_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                        LockName::WILLING_TO_VOTE_LOCK});
-
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
@@ -1169,27 +870,7 @@ Replica::heartbeatSender() {
     std::stringstream msg;
 
     while(true) {
-        this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::STATE_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
-
         if(this->state != ReplicaState::LEADER) {
-            this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                            LockName::LOG_LOCK,
-                                            LockName::STATE_LOCK,
-                                            LockName::COMMIT_INDEX_LOCK,
-                                            LockName::VOTED_FOR_LOCK,
-                                            LockName::NEXT_INDEX_LOCK,
-                                            LockName::MATCH_INDEX_LOCK,
-                                            LockName::SNAPSHOT_LOCK,
-                                            LockName::CLUSTER_MEMBERSHIP_LOCK});
-
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             continue;
         }
@@ -1286,16 +967,6 @@ Replica::heartbeatSender() {
             }
         }
 
-        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::STATE_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::VOTED_FOR_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::MATCH_INDEX_LOCK,
-                                        LockName::SNAPSHOT_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK});
-
         std::this_thread::sleep_for(std::chrono::milliseconds(this->heartbeatTick));
     }
 }
@@ -1320,32 +991,11 @@ Replica::retryRequest() {
         while(timeSpentOnCurrentRetryMS < (0.8 * maxTimeToSpendRetryingMS)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeoutMS));
 
-            this->lockHandler.acquireLocks({LockName::STATE_LOCK,
-                                            LockName::LEADER_LOCK,
-                                            LockName::CURR_TERM_LOCK,
-                                            LockName::VOTED_FOR_LOCK,
-                                            LockName::NEXT_INDEX_LOCK,
-                                            LockName::MATCH_INDEX_LOCK,
-                                            LockName::LOG_LOCK,
-                                            LockName::SNAPSHOT_LOCK,
-                                            LockName::CLUSTER_MEMBERSHIP_LOCK});
-
             Entry entry = this->log.at(job.entryPosition);
 
             if(this->state != ReplicaState::LEADER) {
                 std::queue<Job> empty;
                 std::swap(this->jobsToRetry, empty);
-
-                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                LockName::LEADER_LOCK,
-                                                LockName::CURR_TERM_LOCK,
-                                                LockName::VOTED_FOR_LOCK,
-                                                LockName::NEXT_INDEX_LOCK,
-                                                LockName::MATCH_INDEX_LOCK,
-                                                LockName::LOG_LOCK,
-                                                LockName::SNAPSHOT_LOCK,
-                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
-
                 break;
             }
 
@@ -1373,48 +1023,16 @@ Replica::retryRequest() {
                     this->votedFor = getNullID();
                     std::queue<Job> empty;
                     std::swap(this->jobsToRetry, empty);
-
-                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                    LockName::LEADER_LOCK,
-                                                    LockName::CURR_TERM_LOCK,
-                                                    LockName::VOTED_FOR_LOCK,
-                                                    LockName::NEXT_INDEX_LOCK,
-                                                    LockName::MATCH_INDEX_LOCK,
-                                                    LockName::LOG_LOCK,
-                                                    LockName::SNAPSHOT_LOCK,
-                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
                     break;
                 }
 
                 if(!appendEntryResponse.success) {
                     LOG_INFO("AppendEntryRequest retry to " << targetID << " failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!");
-
-                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                    LockName::LEADER_LOCK,
-                                                    LockName::CURR_TERM_LOCK,
-                                                    LockName::VOTED_FOR_LOCK,
-                                                    LockName::NEXT_INDEX_LOCK,
-                                                    LockName::MATCH_INDEX_LOCK,
-                                                    LockName::LOG_LOCK,
-                                                    LockName::SNAPSHOT_LOCK,
-                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
                 }
                 else {
                     LOG_INFO("Entry successfully replicated on " << targetID  << " during retry: Now increasing nextIndex value from " << this->nextIndex.at(targetID) << " to " << (this->nextIndex.at(targetID)+1));
-
                     this->matchIndex.at(targetID) = this->nextIndex.at(targetID);
                     ++this->nextIndex.at(targetID);
-
-                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                    LockName::LEADER_LOCK,
-                                                    LockName::CURR_TERM_LOCK,
-                                                    LockName::VOTED_FOR_LOCK,
-                                                    LockName::NEXT_INDEX_LOCK,
-                                                    LockName::MATCH_INDEX_LOCK,
-                                                    LockName::LOG_LOCK,
-                                                    LockName::SNAPSHOT_LOCK,
-                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
                     break;
                 }
             }
@@ -1435,18 +1053,9 @@ Replica::retryRequest() {
 
 int32_t
 Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int32_t lastIncludedIndex, const int32_t lastIncludedTerm, const int32_t offset, const std::string& data, const bool done) {
-    this->lockHandler.acquireLocks({LockName::CURR_TERM_LOCK,
-                                    LockName::TIMER_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::SNAPSHOT_LOCK});
-
     int termToReturn = std::max(this->currentTerm, leaderTerm);
 
     if(this->currentTerm > leaderTerm) {
-        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                        LockName::TIMER_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::SNAPSHOT_LOCK});
         return termToReturn;
     }
 
@@ -1475,10 +1084,6 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     compactionFileStream.close();
 
     if(!done) {
-        this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                        LockName::TIMER_LOCK,
-                                        LockName::LOG_LOCK,
-                                        LockName::SNAPSHOT_LOCK});
         return termToReturn;
     }
 
@@ -1492,23 +1097,11 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     compactionFileStream.close();
     */
 
-    this->lockHandler.releaseLocks({LockName::CURR_TERM_LOCK,
-                                    LockName::TIMER_LOCK,
-                                    LockName::LOG_LOCK,
-                                    LockName::SNAPSHOT_LOCK});
-
     return termToReturn;
 }
 
 void
 Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& newConfiguration, const std::string& clientIdentifier, const int32_t requestIdentifier) {
-    this->lockHandler.acquireLocks({LockName::LOG_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::STATE_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                    LockName::NEXT_INDEX_LOCK,
-                                    LockName::MATCH_INDEX_LOCK});
 
     if(this->state != ReplicaState::LEADER) {
         //return false;
@@ -1538,14 +1131,6 @@ Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& 
 
         LOG_INFO("Is this entry from this term? = " << entryIsFromCurrentTerm);
         LOG_INFO("Has the entry been successfully replicated on a majority of replicas " << areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex));
-
-        this->lockHandler.releaseLocks({LockName::LOG_LOCK,
-                                        LockName::CURR_TERM_LOCK,
-                                        LockName::STATE_LOCK,
-                                        LockName::COMMIT_INDEX_LOCK,
-                                        LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                        LockName::NEXT_INDEX_LOCK,
-                                        LockName::MATCH_INDEX_LOCK});
 
         //return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
     }
@@ -1711,14 +1296,6 @@ Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& 
         }
     }
 */
-
-    this->lockHandler.releaseLocks({LockName::LOG_LOCK,
-                                    LockName::CURR_TERM_LOCK,
-                                    LockName::STATE_LOCK,
-                                    LockName::COMMIT_INDEX_LOCK,
-                                    LockName::CLUSTER_MEMBERSHIP_LOCK,
-                                    LockName::NEXT_INDEX_LOCK,
-                                    LockName::MATCH_INDEX_LOCK});
 
     //return true;
 }
