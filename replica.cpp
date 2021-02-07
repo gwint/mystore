@@ -35,6 +35,13 @@
 
 using apache::thrift::transport::TTransportException;
 
+#define LOG_INFO(msgStream) {\
+    std::stringstream msg;\
+    msg << msgStream;\
+    this->logMsg(msg.str());\
+}
+    
+
 Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocketAddrs) : state(ReplicaState::FOLLOWER),
                                                                                           currentTerm(0),
                                                                                           commitIndex(0),
@@ -92,9 +99,7 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
                                     LockName::WILLING_TO_VOTE_LOCK});
 
     #ifndef NDEBUG
-    std::stringstream msg;
-    msg << candidateID << " is requesting my vote.";
-    this->logMsg(msg.str());
+    LOG_INFO(candidateID << " is requesting my vote.");
     #endif
 
     if(term > this->currentTerm) {
@@ -111,9 +116,7 @@ Replica::requestVote(Ballot& _return, const int32_t term, const ID& candidateID,
                                             this->log.size()-1,
                                             this->log.back().term) && this->willingToVote) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Granted vote to " << candidateID;
-        this->logMsg(msg.str());
+        LOG_INFO("Granted vote to " << candidateID);
         #endif
 
         voteGranted = true;
@@ -149,9 +152,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                     LockName::WILLING_TO_VOTE_LOCK});
 
     #ifndef NDEBUG
-    std::stringstream msg;
-    msg <<  leaderID << " is appending " << entry << " to my log.";
-    this->logMsg(msg.str());
+    LOG_INFO(leaderID << " is appending " << entry << " to my log.");
     #endif
 
     if(term >= this->currentTerm) {
@@ -166,9 +167,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                                     (prevLogTerm != this->log.at(prevLogIndex).term)) {
 
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Rejecting appendEntry request from (" << leaderID << "; leaderterm=" << term << ", myterm=" << this->currentTerm << ", prevLogIndex=" << prevLogIndex << ")";
-        this->logMsg(msg.str());
+        LOG_INFO("Rejecting appendEntry request from (" << leaderID << "; leaderterm=" << term << ", myterm=" << this->currentTerm << ", prevLogIndex=" << prevLogIndex << ")");
         #endif
 
         _return.success = false;
@@ -199,9 +198,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
     if(numEntriesToRemove > 0) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Now removing " << numEntriesToRemove << " from the back of the log to bring it in line with the leader";
-        this->logMsg(msg.str());
+        LOG_INFO("Now removing " << numEntriesToRemove << " from the back of the log to bring it in line with the leader");
         #endif
 
         for(unsigned int i = 0; i < numEntriesToRemove; ++i) {
@@ -211,9 +208,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
     if(entry.type != EntryType::EMPTY_ENTRY) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Now appending " << entry << " to the log";
-        this->logMsg(msg.str());
+        LOG_INFO("Now appending " << entry << " to the log");
         #endif
 
         this->log.push_back(entry);
@@ -254,9 +249,7 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
 
     if(this->commitIndex > this->lastApplied) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine";
-        this->logMsg(msg.str());
+        LOG_INFO("Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine");
         #endif
 
         ++this->lastApplied;
@@ -295,10 +288,7 @@ Replica::getServiceClient(const std::string& hostname, int port) {
     }
     catch(TTransportException& e) {
         #ifndef NDEBUG
-        std::stringstream msg;
-        msg.str("");
-        msg << "Error while attempting to open a connection to replica at (" << hostname << ":" << port << "):" << e.getType();
-        this->logMsg(msg.str());
+        LOG_INFO("Error while attempting to open a connection to replica at (" << hostname << ":" << port << "):" << e.getType());
         #endif
     }
 
@@ -322,16 +312,12 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                     LockName::CLUSTER_MEMBERSHIP_LOCK});
 
     #ifndef NDEBUG
-    std::stringstream msg;
-    msg << this->myID << " now attempting to retrieve value associated with " << key;
-    this->logMsg(msg.str());
+    LOG_INFO(this->myID << " now attempting to retrieve value associated with " << key);
     #endif
 
     if(this->state != ReplicaState::LEADER) {
         #ifndef NDEBUG
-        std::stringstream msg;
-        msg << "Was contacted to resolve a GET but am not the leader, redirected to " << this->leader;
-        this->logMsg(msg.str());
+        LOG_INFO("Was contacted to resolve a GET but am not the leader, redirected to " << this->leader);
         #endif
 
         _return.success = false;
@@ -365,9 +351,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
 
         try {
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Now sending a heartbeat to " << id;
-            this->logMsg(msg.str());
+            LOG_INFO("Now sending a heartbeat to " << id);
             #endif
 
             AppendEntryResponse appendEntryResponse;
@@ -381,9 +365,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                                this->commitIndex);
 
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Was AppendEntryRequest successful: " << appendEntryResponse.success;
-            this->logMsg(msg.str());
+            LOG_INFO("Was AppendEntryRequest successful: " << appendEntryResponse.success);
             #endif
 
             if(appendEntryResponse.term > this->currentTerm) {
@@ -393,9 +375,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                 _return.success = false;
 
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "Early exit: Larger term encountered";
-                this->logMsg(msg.str());
+                LOG_INFO("Early exit: Larger term encountered");
                 #endif
 
                 this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -416,9 +396,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
                 _return.success = false;
 
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "Early exit: appendEntryResponse not successful";
-                this->logMsg(msg.str());
+                LOG_INFO("Early exit: appendEntryResponse not successful");
                 #endif
 
                 this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -442,14 +420,10 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         catch(TTransportException& e) {
             #ifndef NDEBUG
             if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                msg.str("");
-                msg << "Timeout occurred while attempting to send a heartbeat to replica at " << id;
-                this->logMsg(msg.str());
+                LOG_INFO("Timeout occurred while attempting to send a heartbeat to replica at " << id);
             }
             else {
-                msg.str("");
-                msg << "Error while attempting to send a heartbeat to replica at " << id;
-                this->logMsg(msg.str());
+                LOG_INFO("Error while attempting to send a heartbeat to replica at " << id);
             }
             #endif
         }
@@ -459,9 +433,7 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
         _return.success = false;
 
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Early exit: replication level needed not reached";
-        this->logMsg(msg.str());
+        LOG_INFO("Early exit: replication level needed not reached");
         #endif
 
         this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -531,16 +503,12 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
     _return.success = true;
 
     #ifndef NDEBUG
-    std::stringstream msg;
-    msg << this->myID << " now attempting to delete " << key;
-    this->logMsg(msg.str());
+    LOG_INFO(this->myID << " now attempting to delete " << key);
     #endif
 
     if(this->state != ReplicaState::LEADER) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Was contacted to resolve a DEL but am not the leader, redirected to " << this-> leader;
-        this->logMsg(msg.str());
+        LOG_INFO("Was contacted to resolve a DEL but am not the leader, redirected to " << this-> leader);
         #endif
 
         _return.success = false;
@@ -565,9 +533,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
     if(requestIdentifier == this->currentRequestBeingServiced) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Continuing servicing of request " << requestIdentifier;
-        this->logMsg(msg.str());
+        LOG_INFO("Continuing servicing of request " << requestIdentifier);
         #endif
 
         unsigned int relevantEntryIndex = 0;
@@ -592,14 +558,8 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
                                         areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
 
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Is this entry from this term? = " << entryIsFromCurrentTerm;
-        this->logMsg(msg.str());
-
-        msg.str("");
-        msg << "Has the entry been successfully replicated on a majority of replicas " <<
-                                 areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
-        this->logMsg(msg.str());
+        LOG_INFO("Is this entry from this term? = " << entryIsFromCurrentTerm);
+        LOG_INFO("Has the entry been successfully replicated on a majority of replicas " << areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex));
         #endif
 
         this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -644,9 +604,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
         try {
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Now sending an AppendEntry request to " << id << "; may take a while...";
-            this->logMsg(msg.str());
+            LOG_INFO("Now sending an AppendEntry request to " << id << "; may take a while...");
             #endif
 
             AppendEntryResponse appendEntryResponse;
@@ -681,9 +639,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
             if(!appendEntryResponse.success) {
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id);
-                this->logMsg(msg.str());
+                LOG_INFO("AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id));
                 #endif
 
                 assert(this->nextIndex.at(id) > 0);
@@ -691,10 +647,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
             }
             else {
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "Entry successfully replicated on " << id << ": Now increasing replication aount from " <<
-                        numServersReplicatedOn << " to " << (numServersReplicatedOn+1);
-                this->logMsg(msg.str());
+                LOG_INFO("Entry successfully replicated on " << id << ": Now increasing replication aount from " << numServersReplicatedOn << " to " << (numServersReplicatedOn+1));
                 #endif
 
                 this->matchIndex[id] = this->nextIndex.at(id);
@@ -708,9 +661,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
         catch(TTransportException& e) {
             if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "Timeout occurred while attempting to append entry to replica at " << id;
-                this->logMsg(msg.str());
+                LOG_INFO("Timeout occurred while attempting to append entry to replica at " << id);
                 #endif
 
                 Job retryJob = {(int) this->log.size()-1, id.hostname, id.port};
@@ -726,19 +677,14 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
 
     if(numServersReplicatedOn < (this->clusterMembership.size() / 2) + 1) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
-             numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1);
-        this->logMsg(msg.str());
+        LOG_INFO("Entry unsuccessfully replicated on a majority of servers: replication amount = " << numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1));
         #endif
 
         _return.success = false;
     }
     else {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Entry successfully replicated on a majority of servers and removing mapping with key: " << key;
-        this->logMsg(msg.str());
+        LOG_INFO("Entry successfully replicated on a majority of servers and removing mapping with key: " << key);
         #endif
 
         if(this->stateMachine.find(key) != this->stateMachine.end()) {
@@ -781,16 +727,12 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
     _return.success = true;
 
     #ifndef NDEBUG
-    std::stringstream msg;
-    msg << this->myID << " now attempting to associate " << key << " with " << value;
-    this->logMsg(msg.str());
+    LOG_INFO(this->myID << " now attempting to associate " << key << " with " << value);
     #endif
 
     if(this->state != ReplicaState::LEADER) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Was contacted to resolve a PUT but am not the leader, redirected to " << this-> leader;
-        this->logMsg(msg.str());
+        LOG_INFO("Was contacted to resolve a PUT but am not the leader, redirected to " << this-> leader);
         #endif
 
         _return.success = false;
@@ -815,9 +757,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     if(requestIdentifier == this->currentRequestBeingServiced) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Continuing servicing of request " << requestIdentifier;
-        this->logMsg(msg.str());
+        LOG_INFO("Continuing servicing of request " << requestIdentifier);
         #endif
 
         unsigned int relevantEntryIndex = 0;
@@ -842,14 +782,8 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
                                         areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
 
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Is this entry from this term? = " << entryIsFromCurrentTerm;
-        this->logMsg(msg.str());
-
-        msg.str("");
-        msg << "Has the entry been successfully replicated on a majority of replicas " <<
-                                 areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
-        this->logMsg(msg.str());
+        LOG_INFO("Is this entry from this term? = " << entryIsFromCurrentTerm);
+        LOG_INFO("Has the entry been successfully replicated on a majority of replicas " << areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex));
         #endif
 
         this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -895,9 +829,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
         try {
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Now sending an AppendEntry request to " << id << "; may take a while...";
-            this->logMsg(msg.str());
+            LOG_INFO("Now sending an AppendEntry request to " << id << "; may take a while...");
             #endif
 
             AppendEntryResponse appendEntryResponse;
@@ -932,9 +864,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
             if(!appendEntryResponse.success) {
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id);
-                this->logMsg(msg.str());
+                LOG_INFO("AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing next index value from " << this->nextIndex.at(id));
                 #endif
 
                 assert(this->nextIndex.at(id) > 0);
@@ -942,10 +872,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
             }
             else {
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "Entry successfully replicated on " << id << ": Now increasing replication aount from " <<
-                        numServersReplicatedOn << " to " << (numServersReplicatedOn+1);
-                this->logMsg(msg.str());
+                LOG_INFO("Entry successfully replicated on " << id << ": Now increasing replication aount from " << numServersReplicatedOn << " to " << (numServersReplicatedOn+1));
                 #endif
 
                 this->matchIndex[id] = this->nextIndex.at(id);
@@ -959,9 +886,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
         catch(TTransportException& e) {
             if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "Timeout occurred while attempting to append entry to replica at " << id;
-                this->logMsg(msg.str());
+                LOG_INFO("Timeout occurred while attempting to append entry to replica at " << id);
                 #endif
 
                 Job retryJob = {(int) this->log.size()-1, id.hostname, id.port};
@@ -977,20 +902,14 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
 
     if(numServersReplicatedOn < ((this->clusterMembership.size()-this->nonVotingMembers.size()) / 2) + 1) {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Entry unsuccessfully replicated on a majority of servers: replication amount = " <<
-             numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1);
-        this->logMsg(msg.str());
+        LOG_INFO("Entry unsuccessfully replicated on a majority of servers: replication amount = " << numServersReplicatedOn  << "/" <<  ((this->clusterMembership.size() + 1 / 2) + 1));
         #endif
 
         _return.success = false;
     }
     else {
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Entry successfully replicated on a majority of servers and writing mapping " << key << " => " <<
-                value << " to the state machine";
-        this->logMsg(msg.str());
+        LOG_INFO("Entry successfully replicated on a majority of servers and writing mapping " << key << " => " << value << " to the state machine");
         #endif
 
         if(this->stateMachine.find(key) == this->stateMachine.end()) {
@@ -1028,7 +947,7 @@ Replica::kill() {
     idStream << " is now dying";
 
     #ifndef NDEBUG
-    this->logMsg(idStream.str());
+    LOG_INFO(idStream.str());
     #endif
 
     exit(0);
@@ -1109,10 +1028,7 @@ Replica::getInformation(GetInformationResponse& _return) {
             ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
             #ifndef NDEBUG
-            std::stringstream msg;
-            msg.str("");
-            msg << "Now sending a getInformationHelper request to " << id << "; may take a while...";
-            this->logMsg(msg.str());
+            LOG_INFO("Now sending a getInformationHelper request to " << id << "; may take a while...");
             #endif
 
             GetInformationHelperResponse getInformationHelperResponse;
@@ -1192,7 +1108,7 @@ Replica::timer() {
 
         if(this->timeLeft == 0) {
             #ifndef NDEBUG
-            this->logMsg("Time has expired!");
+            LOG_INFO("Time has expired!");
             #endif
 
             unsigned int votesReceived = 1;
@@ -1207,10 +1123,7 @@ Replica::timer() {
                 }
 
                 #ifndef NDEBUG
-                msg.str("");
-                msg << "Now requesting vote from ";
-                msg << id;
-                this->logMsg(msg.str());
+                LOG_INFO("Now requesting vote from " << id);
                 #endif
 
                 try {
@@ -1231,22 +1144,16 @@ Replica::timer() {
                 catch(apache::thrift::transport::TTransportException& e) {
                     #ifndef NDEBUG
                     if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                        msg.str("");
-                        msg << "Timeout occurred while requesting a vote from " << id;
-                        this->logMsg(msg.str());
+                        LOG_INFO("Timeout occurred while requesting a vote from " << id);
                     }
                     else {
-                        msg.str("");
-                        msg << "Error while attempting to request a vote from " << id;
-                        this->logMsg(msg.str());
+                        LOG_INFO("Error while attempting to request a vote from " << id);
                     }
                     #endif
                 }
 
                 #ifndef NDEBUG
-                msg.str("");
-                msg << votesReceived << " votes have been received during this election";
-                this->logMsg(msg.str());
+                LOG_INFO(votesReceived << " votes have been received during this election");
                 #endif
 
                 if(votesReceived >= (this->clusterMembership.size() / 2) + 1) {
@@ -1292,9 +1199,7 @@ Replica::timer() {
 
                             if(!appendEntryResponse.success) {
                                 #ifndef NDEBUG
-                                msg.str("");
-                                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
-                                this->logMsg(msg.str());
+                                LOG_INFO("AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id));
                                 #endif
 
                                 int possibleNewNextIndex = this->nextIndex.at(id)-1;
@@ -1302,9 +1207,7 @@ Replica::timer() {
                             }
                             else {
                                 #ifndef NDEBUG
-                                msg.str("");
-                                msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
-                                this->logMsg(msg.str());
+                                LOG_INFO("AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id));
                                 #endif
 
                                 this->matchIndex[id] = this->nextIndex.at(id);
@@ -1314,21 +1217,17 @@ Replica::timer() {
                         catch(TTransportException& e) {
                             #ifndef NDEBUG
                             if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                                msg.str("");
-                                msg << "Timeout occurred while asserting control of the replica at " << id;
-                                this->logMsg(msg.str());
+                                LOG_INFO("Timeout occurred while asserting control of the replica at " << id);
                             }
                             else {
-                                msg.str("");
-                                msg << "Error while attempting to assert control of the replica at " << id;
-                                this->logMsg(msg.str());
+                                LOG_INFO("Error while attempting to assert control of the replica at " << id);
                             }
                             #endif
                         }
                     }
 
                     #ifndef NDEBUG
-                    this->logMsg("I have asserted control of the cluster!");
+                    LOG_INFO("I have asserted control of the cluster!");
                     #endif
 
                     break;
@@ -1394,9 +1293,7 @@ Replica::heartbeatSender() {
         this->commitIndex = this->findUpdatedCommitIndex();
         if(old != this->commitIndex) {
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Commit index changed from " << old << " to " << this->commitIndex;
-            this->logMsg(msg.str());
+            LOG_INFO("Commit index changed from " << old << " to " << this->commitIndex);
             #endif
         }
 
@@ -1419,9 +1316,7 @@ Replica::heartbeatSender() {
             };
 
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine";
-            this->logMsg(msg.str());
+            LOG_INFO("Now applying log entry " << this->log.at(this->lastApplied+1) << " to state machine");
             #endif
 
             ++this->lastApplied;
@@ -1466,9 +1361,7 @@ Replica::heartbeatSender() {
 
                 if(!appendEntryResponse.success) {
                     #ifndef NDEBUG
-                    msg.str("");
-                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
-                    this->logMsg(msg.str());
+                    LOG_INFO("AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id));
                     #endif
 
                     int possibleNewNextIndex = this->nextIndex.at(id)-1;
@@ -1476,9 +1369,7 @@ Replica::heartbeatSender() {
                 }
                 else if(entryToSend.type != EntryType::EMPTY_ENTRY) {
                     #ifndef NDEBUG
-                    msg.str("");
-                    msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
-                    this->logMsg(msg.str());
+                    LOG_INFO("AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id));
                     #endif
 
                     this->matchIndex[id] = this->nextIndex.at(id);
@@ -1486,22 +1377,17 @@ Replica::heartbeatSender() {
                 }
                 else {
                     #ifndef NDEBUG
-                    msg.str("");
-                    msg << "AppendEntryRequest (heartbeat) directed to " << id << " successful";
-                    this->logMsg(msg.str());
+                    LOG_INFO("AppendEntryRequest (heartbeat) directed to " << id << " successful");
                     #endif
                 }
             }
             catch(TTransportException& e) {
                 #ifndef NDEBUG
-                msg.str("");
                 if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                    msg << "Timeout occurred while sending a heartbeat to the replica at " << id;
-                    this->logMsg(msg.str());
+                    LOG_INFO("Timeout occurred while sending a heartbeat to the replica at " << id);
                 }
                 else {
-                    msg << "Error while attempting to send an AppendEntryRequest to the replica at " << id;
-                    this->logMsg(msg.str());
+                    LOG_INFO("Error while attempting to send an AppendEntryRequest to the replica at " << id);
                 }
                 #endif
             }
@@ -1571,9 +1457,7 @@ Replica::retryRequest() {
             }
 
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Retrying AppendEntryRequest " << entry << " after " << timeoutMS << " ms.";
-            this->logMsg(msg.str());
+            LOG_INFO("Retrying AppendEntryRequest " << entry << " after " << timeoutMS << " ms.");
             #endif
 
             ID targetID;
@@ -1614,9 +1498,7 @@ Replica::retryRequest() {
 
                 if(!appendEntryResponse.success) {
                     #ifndef NDEBUG
-                    msg.str("");
-                    msg << "AppendEntryRequest retry to " << targetID << " failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!";
-                    this->logMsg(msg.str());
+                    LOG_INFO("AppendEntryRequest retry to " << targetID << " failed due to log inconsistency: THIS SHOULD NEVER HAPPEN!");
                     #endif
 
                     this->lockHandler.releaseLocks({LockName::STATE_LOCK,
@@ -1631,10 +1513,7 @@ Replica::retryRequest() {
                 }
                 else {
                     #ifndef NDEBUG
-                    msg.str("");
-                    msg << "Entry successfully replicated on " << targetID  << " during retry: Now increasing nextIndex value from " <<
-                                this->nextIndex.at(targetID) << " to " << (this->nextIndex.at(targetID)+1);
-                    this->logMsg(msg.str());
+                    LOG_INFO("Entry successfully replicated on " << targetID  << " during retry: Now increasing nextIndex value from " << this->nextIndex.at(targetID) << " to " << (this->nextIndex.at(targetID)+1));
                     #endif
 
                     this->matchIndex.at(targetID) = this->nextIndex.at(targetID);
@@ -1654,14 +1533,11 @@ Replica::retryRequest() {
             }
             catch(TTransportException& e) {
                 #ifndef NDEBUG
-                msg.str("");
                 if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                    msg << "Timeout occurred while retrying an AppendEntryRequest to the replica at " << targetID;
-                    this->logMsg(msg.str());
+                    LOG_INFO("Timeout occurred while retrying an AppendEntryRequest to the replica at " << targetID);
                 }
                 else {
-                    msg << "Non-Timeout error while attempting to retry an AppendEntryRequest to the replica at " << targetID;
-                    this->logMsg(msg.str());
+                    LOG_INFO("Non-Timeout error while attempting to retry an AppendEntryRequest to the replica at " << targetID);
                 }
                 #endif
             }
@@ -1756,9 +1632,7 @@ Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& 
     if(requestIdentifier == this->currentRequestBeingServiced) {
         #ifndef NDEBUG
         std::stringstream msg;
-        msg.str("");
-        msg << "Continuing servicing of request " << requestIdentifier;
-        this->logMsg(msg.str());
+        LOG_INFO("Continuing servicing of request " << requestIdentifier);
         #endif
 
         unsigned int relevantEntryIndex = 0;
@@ -1780,14 +1654,8 @@ Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& 
         matchIndices.push_back(this->log.size()-1);
 
         #ifndef NDEBUG
-        msg.str("");
-        msg << "Is this entry from this term? = " << entryIsFromCurrentTerm;
-        this->logMsg(msg.str());
-
-        msg.str("");
-        msg << "Has the entry been successfully replicated on a majority of replicas " <<
-                                 areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
-        this->logMsg(msg.str());
+        LOG_INFO("Is this entry from this term? = " << entryIsFromCurrentTerm);
+        LOG_INFO("Has the entry been successfully replicated on a majority of replicas " << areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex));
         #endif
 
         this->lockHandler.releaseLocks({LockName::LOG_LOCK,
@@ -1987,6 +1855,8 @@ Replica::isAtLeastAsUpToDateAs(unsigned int otherLastLogIndex,
 
 void
 Replica::logMsg(std::string message) {
+    LOG_INFO("hello" << 8 << "this");
+
     std::stringstream stateStream;
     std::stringstream logStream;
     std::stringstream stateMachineStream;
