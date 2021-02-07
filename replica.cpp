@@ -280,6 +280,32 @@ Replica::appendEntry(AppendEntryResponse& _return, const int32_t term, const ID&
                                     LockName::WILLING_TO_VOTE_LOCK});
 }
 
+ReplicaServiceClient
+Replica::getServiceClient(const std::string& hostname, int port) {
+    std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(hostname, port));
+    socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+    socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+    socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
+    std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
+    std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
+    ReplicaServiceClient client(protocol);
+
+    try {
+        transport->open();
+    }
+    catch(TTransportException& e) {
+        #ifndef NDEBUG
+        std::stringstream msg;
+        msg.str("");
+        msg << "Error while attempting to open a connection to replica at (" << hostname << ":" << port << "):" << e.getType();
+        this->logMsg(msg.str());
+        #endif
+    }
+
+    return client;
+}
+
+
 void
 Replica::get(GetResponse& _return, const std::string& key, const std::string& clientIdentifier, const int32_t requestIdentifier, const int32_t numPastMappings) {
     _return.success = true;
@@ -335,113 +361,96 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
             continue;
         }
 
-        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-        ReplicaServiceClient client(protocol);
+        ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
         try {
-            transport->open();
+            #ifndef NDEBUG
+            msg.str("");
+            msg << "Now sending a heartbeat to " << id;
+            this->logMsg(msg.str());
+            #endif
 
-            try {
+            AppendEntryResponse appendEntryResponse;
+
+            client.appendEntry(appendEntryResponse,
+                               this->currentTerm,
+                               this->myID,
+                               this->log.size()-1,
+                               this->log.back().term,
+                               getEmptyLogEntry(),
+                               this->commitIndex);
+
+            #ifndef NDEBUG
+            msg.str("");
+            msg << "Was AppendEntryRequest successful: " << appendEntryResponse.success;
+            this->logMsg(msg.str());
+            #endif
+
+            if(appendEntryResponse.term > this->currentTerm) {
+                this->state = ReplicaState::FOLLOWER;
+                this->currentTerm = appendEntryResponse.term;
+                this->votedFor = getNullID();
+                _return.success = false;
+
                 #ifndef NDEBUG
                 msg.str("");
-                msg << "Now sending a heartbeat to " << id;
+                msg << "Early exit: Larger term encountered";
                 this->logMsg(msg.str());
                 #endif
 
-                AppendEntryResponse appendEntryResponse;
+                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                LockName::LEADER_LOCK,
+                                                LockName::CURR_TERM_LOCK,
+                                                LockName::LOG_LOCK,
+                                                LockName::COMMIT_INDEX_LOCK,
+                                                LockName::VOTED_FOR_LOCK,
+                                                LockName::MATCH_INDEX_LOCK,
+                                                LockName::LATEST_NO_OP_LOG_INDEX,
+                                                LockName::SNAPSHOT_LOCK,
+                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
 
-                client.appendEntry(appendEntryResponse,
-                                   this->currentTerm,
-                                   this->myID,
-                                   this->log.size()-1,
-                                   this->log.back().term,
-                                   getEmptyLogEntry(),
-                                   this->commitIndex);
-
-                #ifndef NDEBUG
-                msg.str("");
-                msg << "Was AppendEntryRequest successful: " << appendEntryResponse.success;
-                this->logMsg(msg.str());
-                #endif
-
-                if(appendEntryResponse.term > this->currentTerm) {
-                    this->state = ReplicaState::FOLLOWER;
-                    this->currentTerm = appendEntryResponse.term;
-                    this->votedFor = getNullID();
-                    _return.success = false;
-
-                    #ifndef NDEBUG
-                    msg.str("");
-                    msg << "Early exit: Larger term encountered";
-                    this->logMsg(msg.str());
-                    #endif
-
-                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                    LockName::LEADER_LOCK,
-                                                    LockName::CURR_TERM_LOCK,
-                                                    LockName::LOG_LOCK,
-                                                    LockName::COMMIT_INDEX_LOCK,
-                                                    LockName::VOTED_FOR_LOCK,
-                                                    LockName::MATCH_INDEX_LOCK,
-                                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                                    LockName::SNAPSHOT_LOCK,
-                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
-                    return;
-                }
-
-                if(!appendEntryResponse.success) {
-                    _return.success = false;
-
-                    #ifndef NDEBUG
-                    msg.str("");
-                    msg << "Early exit: appendEntryResponse not successful";
-                    this->logMsg(msg.str());
-                    #endif
-
-                    this->lockHandler.releaseLocks({LockName::STATE_LOCK,
-                                                    LockName::LEADER_LOCK,
-                                                    LockName::CURR_TERM_LOCK,
-                                                    LockName::LOG_LOCK,
-                                                    LockName::COMMIT_INDEX_LOCK,
-                                                    LockName::VOTED_FOR_LOCK,
-                                                    LockName::MATCH_INDEX_LOCK,
-                                                    LockName::LATEST_NO_OP_LOG_INDEX,
-                                                    LockName::SNAPSHOT_LOCK,
-                                                    LockName::CLUSTER_MEMBERSHIP_LOCK});
-
-                    return;
-                }
-
-                if(this->nonVotingMembers.find(id) == this->nonVotingMembers.end()) {
-                    ++numReplicasSuccessfullyContacted;
-                }
+                return;
             }
-            catch(TTransportException& e) {
+
+            if(!appendEntryResponse.success) {
+                _return.success = false;
+
                 #ifndef NDEBUG
-                if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                    msg.str("");
-                    msg << "Timeout occurred while attempting to send a heartbeat to replica at " << id;
-                    this->logMsg(msg.str());
-                }
-                else {
-                    msg.str("");
-                    msg << "Error while attempting to send a heartbeat to replica at " << id;
-                    this->logMsg(msg.str());
-                }
+                msg.str("");
+                msg << "Early exit: appendEntryResponse not successful";
+                this->logMsg(msg.str());
                 #endif
+
+                this->lockHandler.releaseLocks({LockName::STATE_LOCK,
+                                                LockName::LEADER_LOCK,
+                                                LockName::CURR_TERM_LOCK,
+                                                LockName::LOG_LOCK,
+                                                LockName::COMMIT_INDEX_LOCK,
+                                                LockName::VOTED_FOR_LOCK,
+                                                LockName::MATCH_INDEX_LOCK,
+                                                LockName::LATEST_NO_OP_LOG_INDEX,
+                                                LockName::SNAPSHOT_LOCK,
+                                                LockName::CLUSTER_MEMBERSHIP_LOCK});
+
+                return;
+            }
+
+            if(this->nonVotingMembers.find(id) == this->nonVotingMembers.end()) {
+                ++numReplicasSuccessfullyContacted;
             }
         }
         catch(TTransportException& e) {
             #ifndef NDEBUG
-            msg.str("");
-            msg << "Error while attempting to open a connection to send an empty AppendEntry request to replica at " << id << ":" << e.getType();
-            this->logMsg(msg.str());
+            if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                msg.str("");
+                msg << "Timeout occurred while attempting to send a heartbeat to replica at " << id;
+                this->logMsg(msg.str());
+            }
+            else {
+                msg.str("");
+                msg << "Error while attempting to send a heartbeat to replica at " << id;
+                this->logMsg(msg.str());
+            }
             #endif
         }
     }
@@ -631,25 +640,7 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
             continue;
         }
 
-        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-        ReplicaServiceClient client(protocol);
-
-        try {
-            transport->open();
-        }
-        catch(TTransportException& e) {
-            #ifndef NDEBUG
-            msg.str("");
-            msg << "Error while opening a connection to append an entry to replica at " << id << ":" << e.getType();
-            this->logMsg(msg.str());
-            #endif
-            continue;
-        }
+        ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
         try {
             #ifndef NDEBUG
@@ -900,25 +891,7 @@ Replica::put(PutResponse& _return, const std::string& key, const std::string& va
             continue;
         }
 
-        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-        ReplicaServiceClient client(protocol);
-
-        try {
-            transport->open();
-        }
-        catch(TTransportException& e) {
-            #ifndef NDEBUG
-            msg.str("");
-            msg << "Error while opening a connection to append an entry to replica at " << id << ":" << e.getType();
-            this->logMsg(msg.str());
-            #endif
-            continue;
-        }
+        ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
         try {
             #ifndef NDEBUG
@@ -1132,34 +1105,9 @@ Replica::getInformation(GetInformationResponse& _return) {
             continue;
         }
 
-        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-        ReplicaServiceClient client(protocol);
-
         try {
-            transport->open();
-        }
-        catch(TTransportException& e) {
-            #ifndef NDEBUG
-            std::stringstream msg;
-            msg.str("");
-            msg << "Error while opening a connection to get information from replica at " << id << ":" << e.getType();
-            this->logMsg(msg.str());
-            #endif
+            ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
-            _return.clusterInformation[id]["endpoint"] = "N/A";
-            _return.clusterInformation[id]["role"] = "N/A";
-            _return.clusterInformation[id]["term"] = "N/A";
-            _return.clusterInformation[id]["index"] = "N/A";
-
-            continue;
-        }
-
-        try {
             #ifndef NDEBUG
             std::stringstream msg;
             msg.str("");
@@ -1265,50 +1213,33 @@ Replica::timer() {
                 this->logMsg(msg.str());
                 #endif
 
-                std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-                socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-                std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-                ReplicaServiceClient client(protocol);
-
                 try {
-                    transport->open();
+                    ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
-                    try {
-                        Ballot ballot;
+                    Ballot ballot;
 
-                        client.requestVote(ballot,
-                                           this->currentTerm,
-                                           this->myID,
-                                           this->log.size(),
-                                           this->log.back().term);
+                    client.requestVote(ballot,
+                                       this->currentTerm,
+                                       this->myID,
+                                       this->log.size(),
+                                       this->log.back().term);
 
-                        if(ballot.voteGranted) {
-                            ++votesReceived;
-                        }
-                    }
-                    catch(apache::thrift::transport::TTransportException& e) {
-                        #ifndef NDEBUG
-                        if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                            msg.str("");
-                            msg << "Timeout occurred while requesting a vote from " << id;
-                            this->logMsg(msg.str());
-                        }
-                        else {
-                            msg.str("");
-                            msg << "Error while attempting to request a vote from " << id;
-                            this->logMsg(msg.str());
-                        }
-                        #endif
+                    if(ballot.voteGranted) {
+                        ++votesReceived;
                     }
                 }
                 catch(apache::thrift::transport::TTransportException& e) {
                     #ifndef NDEBUG
-                    msg.str("");
-                    msg << "Error while attempting to open a connection to request a vote from replica at " << id << ":" << e.getType();
-                    this->logMsg(msg.str());
+                    if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                        msg.str("");
+                        msg << "Timeout occurred while requesting a vote from " << id;
+                        this->logMsg(msg.str());
+                    }
+                    else {
+                        msg.str("");
+                        msg << "Error while attempting to request a vote from " << id;
+                        this->logMsg(msg.str());
+                    }
                     #endif
                 }
 
@@ -1340,75 +1271,58 @@ Replica::timer() {
                         this->nextIndex[id] = this->log.size()-1;
                         this->matchIndex[id] = 0;
 
-                        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-                        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-                        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-                        ReplicaServiceClient client(protocol);
-
                         try {
-                            transport->open();
+                            ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
-                            try {
-                                AppendEntryResponse appendEntryResponse;
-                                auto it = this->log.end() - 2;
-                                client.appendEntry(appendEntryResponse,
-                                                   this->currentTerm,
-                                                   this->myID,
-                                                   this->log.size()-2,
-                                                   it->term,
-                                                   noopEntry,
-                                                   this->commitIndex);
+                            AppendEntryResponse appendEntryResponse;
+                            auto it = this->log.end() - 2;
+                            client.appendEntry(appendEntryResponse,
+                                               this->currentTerm,
+                                               this->myID,
+                                               this->log.size()-2,
+                                               it->term,
+                                               noopEntry,
+                                               this->commitIndex);
 
-                                if(appendEntryResponse.term > this->currentTerm) {
-                                    this->state = ReplicaState::FOLLOWER;
-                                    this->currentTerm = appendEntryResponse.term;
-                                    this->votedFor = getNullID();
-                                }
-
-                                if(!appendEntryResponse.success) {
-                                    #ifndef NDEBUG
-                                    msg.str("");
-                                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
-                                    this->logMsg(msg.str());
-                                    #endif
-
-                                    int possibleNewNextIndex = this->nextIndex.at(id)-1;
-                                    this->nextIndex[id] = std::max(1, possibleNewNextIndex);
-                                }
-                                else {
-                                    #ifndef NDEBUG
-                                    msg.str("");
-                                    msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
-                                    this->logMsg(msg.str());
-                                    #endif
-
-                                    this->matchIndex[id] = this->nextIndex.at(id);
-                                    ++this->nextIndex.at(id);
-                                }
+                            if(appendEntryResponse.term > this->currentTerm) {
+                                this->state = ReplicaState::FOLLOWER;
+                                this->currentTerm = appendEntryResponse.term;
+                                this->votedFor = getNullID();
                             }
-                            catch(TTransportException& e) {
+
+                            if(!appendEntryResponse.success) {
                                 #ifndef NDEBUG
-                                if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                                    msg.str("");
-                                    msg << "Timeout occurred while asserting control of the replica at " << id;
-                                    this->logMsg(msg.str());
-                                }
-                                else {
-                                    msg.str("");
-                                    msg << "Error while attempting to assert control of the replica at " << id;
-                                    this->logMsg(msg.str());
-                                }
+                                msg.str("");
+                                msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
+                                this->logMsg(msg.str());
                                 #endif
+
+                                int possibleNewNextIndex = this->nextIndex.at(id)-1;
+                                this->nextIndex[id] = std::max(1, possibleNewNextIndex);
+                            }
+                            else {
+                                #ifndef NDEBUG
+                                msg.str("");
+                                msg << "AppendEntryRequest containing no-op directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
+                                this->logMsg(msg.str());
+                                #endif
+
+                                this->matchIndex[id] = this->nextIndex.at(id);
+                                ++this->nextIndex.at(id);
                             }
                         }
                         catch(TTransportException& e) {
                             #ifndef NDEBUG
-                            msg.str("");
-                            msg << "Error while attempting to open a connection to assert control over the replica at " << id << ":" << e.getType();
-                            this->logMsg(msg.str());
+                            if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                                msg.str("");
+                                msg << "Timeout occurred while asserting control of the replica at " << id;
+                                this->logMsg(msg.str());
+                            }
+                            else {
+                                msg.str("");
+                                msg << "Error while attempting to assert control of the replica at " << id;
+                                this->logMsg(msg.str());
+                            }
                             #endif
                         }
                     }
@@ -1519,15 +1433,6 @@ Replica::heartbeatSender() {
                 continue;
             }
 
-            std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-            socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-
-            std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-            ReplicaServiceClient client(protocol);
-
             Entry entryToSend = getEmptyLogEntry();
             entryToSend.type = EntryType::EMPTY_ENTRY;
             unsigned int prevLogIndex = this->log.size()-1;
@@ -1540,74 +1445,64 @@ Replica::heartbeatSender() {
             }
 
             try {
-                transport->open();
+                ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
-                try {
-                    AppendEntryResponse appendEntryResponse;
-                    client.appendEntry(appendEntryResponse,
-                                       this->currentTerm,
-                                       this->myID,
-                                       prevLogIndex,
-                                       prevLogTerm,
-                                       entryToSend,
-                                       this->commitIndex);
+                AppendEntryResponse appendEntryResponse;
+                client.appendEntry(appendEntryResponse,
+                                   this->currentTerm,
+                                   this->myID,
+                                   prevLogIndex,
+                                   prevLogTerm,
+                                   entryToSend,
+                                   this->commitIndex);
 
-                    if(appendEntryResponse.term > this->currentTerm) {
-                        this->state = ReplicaState::FOLLOWER;
-                        this->currentTerm = appendEntryResponse.term;
-                        this->votedFor = getNullID();
-                        break;
-                    }
-
-
-                    if(!appendEntryResponse.success) {
-                        #ifndef NDEBUG
-                        msg.str("");
-                        msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
-                        this->logMsg(msg.str());
-                        #endif
-
-                        int possibleNewNextIndex = this->nextIndex.at(id)-1;
-                        this->nextIndex[id] = std::max(0, possibleNewNextIndex);
-                    }
-                    else if(entryToSend.type != EntryType::EMPTY_ENTRY) {
-                        #ifndef NDEBUG
-                        msg.str("");
-                        msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
-                        this->logMsg(msg.str());
-                        #endif
-
-                        this->matchIndex[id] = this->nextIndex.at(id);
-                        ++this->nextIndex.at(id);
-                    }
-                    else {
-                        #ifndef NDEBUG
-                        msg.str("");
-                        msg << "AppendEntryRequest (heartbeat) directed to " << id << " successful";
-                        this->logMsg(msg.str());
-                        #endif
-                    }
+                if(appendEntryResponse.term > this->currentTerm) {
+                    this->state = ReplicaState::FOLLOWER;
+                    this->currentTerm = appendEntryResponse.term;
+                    this->votedFor = getNullID();
+                    break;
                 }
 
-                catch(TTransportException& e) {
+
+                if(!appendEntryResponse.success) {
                     #ifndef NDEBUG
                     msg.str("");
-                    if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
-                        msg << "Timeout occurred while sending a heartbeat to the replica at " << id;
-                        this->logMsg(msg.str());
-                    }
-                    else {
-                        msg << "Error while attempting to send an AppendEntryRequest to the replica at " << id;
-                        this->logMsg(msg.str());
-                    }
+                    msg << "AppendEntryRequest directed to " << id << " failed due to log inconsistency: Reducing nextIndex value from " << this->nextIndex.at(id);
+                    this->logMsg(msg.str());
+                    #endif
+
+                    int possibleNewNextIndex = this->nextIndex.at(id)-1;
+                    this->nextIndex[id] = std::max(0, possibleNewNextIndex);
+                }
+                else if(entryToSend.type != EntryType::EMPTY_ENTRY) {
+                    #ifndef NDEBUG
+                    msg.str("");
+                    msg << "AppendEntryRequest directed to " << id << " successful: Increasing nextIndex value from " << this->nextIndex.at(id);
+                    this->logMsg(msg.str());
+                    #endif
+
+                    this->matchIndex[id] = this->nextIndex.at(id);
+                    ++this->nextIndex.at(id);
+                }
+                else {
+                    #ifndef NDEBUG
+                    msg.str("");
+                    msg << "AppendEntryRequest (heartbeat) directed to " << id << " successful";
+                    this->logMsg(msg.str());
                     #endif
                 }
             }
             catch(TTransportException& e) {
                 #ifndef NDEBUG
                 msg.str("");
-                msg << "Error while attempting to establish a connection to send an appendEntry request to " << id << " from heartbeat sender: " << e.getType();
-                this->logMsg(msg.str());
+                if(e.getType() == TTransportException::TTransportExceptionType::TIMED_OUT) {
+                    msg << "Timeout occurred while sending a heartbeat to the replica at " << id;
+                    this->logMsg(msg.str());
+                }
+                else {
+                    msg << "Error while attempting to send an AppendEntryRequest to the replica at " << id;
+                    this->logMsg(msg.str());
+                }
                 #endif
             }
         }
@@ -1685,27 +1580,9 @@ Replica::retryRequest() {
             targetID.hostname = job.targetHost;
             targetID.port = job.targetPort;
 
-            std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(targetID.hostname, targetID.port));
-            socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-
-            std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-            ReplicaServiceClient client(protocol);
-
             try {
-                transport->open();
-            }
-            catch(TTransportException& e) {
-                #ifndef NDEBUG
-                msg.str("");
-                msg << "Error while attempting to open a connecton to retry an AppendEntryRequest to the replica at " << targetID;
-                this->logMsg(msg.str());
-                #endif
-            }
+                ReplicaServiceClient client = getServiceClient(job.targetHost, job.targetPort);
 
-            try {
                 AppendEntryResponse appendEntryResponse;
                 client.appendEntry(appendEntryResponse,
                                    this->currentTerm,
@@ -1862,8 +1739,8 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     return termToReturn;
 }
 
-bool
-Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std::string& clientIdentifier, const int32_t requestIdentifier) {
+void
+Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& newConfiguration, const std::string& clientIdentifier, const int32_t requestIdentifier) {
     this->lockHandler.acquireLocks({LockName::LOG_LOCK,
                                     LockName::CURR_TERM_LOCK,
                                     LockName::STATE_LOCK,
@@ -1873,7 +1750,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                     LockName::MATCH_INDEX_LOCK});
 
     if(this->state != ReplicaState::LEADER) {
-        return false;
+        //return false;
     }
 
     if(requestIdentifier == this->currentRequestBeingServiced) {
@@ -1921,7 +1798,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                         LockName::NEXT_INDEX_LOCK,
                                         LockName::MATCH_INDEX_LOCK});
 
-        return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
+        //return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
     }
 
     this->currentRequestBeingServiced = requestIdentifier;
@@ -1963,45 +1840,32 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
             continue;
         }
 
-        std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-        socket->setConnTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setSendTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-        socket->setRecvTimeout(atoi(dotenv::env[RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-
-        std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-        std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-        ReplicaServiceClient client(protocol);
-
         try {
-            transport->open();
+            ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
 
-            try {
-                AppendEntryResponse appendEntryResponse;
-                client.appendEntry(appendEntryResponse,
-                                   this->currentTerm,
-                                   this->myID,
-                                   this->log.size()-2,
-                                   this->log.at(this->log.size()-2).term,
-                                   newConfigurationEntry,
-                                   this->commitIndex);
+            AppendEntryResponse appendEntryResponse;
+            client.appendEntry(appendEntryResponse,
+                               this->currentTerm,
+                               this->myID,
+                               this->log.size()-2,
+                               this->log.at(this->log.size()-2).term,
+                               newConfigurationEntry,
+                               this->commitIndex);
 
-                if(appendEntryResponse.term > this->currentTerm) {
-                    this->state = ReplicaState::FOLLOWER;
-                    this->currentTerm = appendEntryResponse.term;
-                    this->votedFor = getNullID();
-                    break;
-                }
-
-                if(!appendEntryResponse.success) {
-                    this->currentTerm = appendEntryResponse.term;
-                    this->state = ReplicaState::FOLLOWER;
-                    this->votedFor = getNullID();
-                }
-                else {
-                    ++replicationAmount;
-                }
+            if(appendEntryResponse.term > this->currentTerm) {
+                this->state = ReplicaState::FOLLOWER;
+                this->currentTerm = appendEntryResponse.term;
+                this->votedFor = getNullID();
+                break;
             }
-            catch(TTransportException& e) {
+
+            if(!appendEntryResponse.success) {
+                this->currentTerm = appendEntryResponse.term;
+                this->state = ReplicaState::FOLLOWER;
+                this->votedFor = getNullID();
+            }
+            else {
+                ++replicationAmount;
             }
         }
         catch(TTransportException& e) {
@@ -2051,8 +1915,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                     if(!appendEntryResponse.success) {
                         this->currentTerm = appendEntryResponse.term;
                         this->state = ReplicaState::FOLLOWER;
-                        this->votedFor = getNullID();
-                    }
+                        this->votedFor = getNullID(); }
                     else {
                         ++replicationAmount;
                     }
@@ -2108,7 +1971,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                     LockName::NEXT_INDEX_LOCK,
                                     LockName::MATCH_INDEX_LOCK});
 
-    return true;
+    //return true;
 }
 
 bool
