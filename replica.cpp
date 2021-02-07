@@ -43,18 +43,18 @@ using apache::thrift::transport::TTransportException;
     
 
 Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocketAddrs) : state(ReplicaState::FOLLOWER),
-                                                                                          currentTerm(0),
-                                                                                          commitIndex(0),
-                                                                                          lastApplied(0),
-                                                                                          timeout(getElectionTimeout()),
-                                                                                          votedFor(getNullID()),
-                                                                                          leader(getNullID()),
-                                                                                          currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
-                                                                                          hasOperationStarted(false),
-                                                                                          clusterMembership(getMemberIDs(clusterSocketAddrs)),
-                                                                                          lockHandler(16),
-                                                                                          noopIndex(0),
-											  willingToVote(true) {
+          currentTerm(0),
+          commitIndex(0),
+          lastApplied(0),
+          timeout(getElectionTimeout()),
+          votedFor(getNullID()),
+          leader(getNullID()),
+          currentRequestBeingServiced(std::numeric_limits<unsigned int>::max()),
+          hasOperationStarted(false),
+          clusterMembership(getMemberIDs(clusterSocketAddrs)),
+          lockHandler(16),
+          noopIndex(0),
+	  willingToVote(true) {
 
     this->timeLeft = this->timeout;
     this->heartbeatTick = atoi(dotenv::env[HEARTBEAT_TICK_ENV_VAR_NAME].c_str());
@@ -1855,8 +1855,6 @@ Replica::isAtLeastAsUpToDateAs(unsigned int otherLastLogIndex,
 
 void
 Replica::logMsg(std::string message) {
-    LOG_INFO("hello" << 8 << "this");
-
     std::stringstream stateStream;
     std::stringstream logStream;
     std::stringstream stateMachineStream;
