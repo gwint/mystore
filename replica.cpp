@@ -328,9 +328,9 @@ Replica::get(GetResponse& _return, const std::string& key, const std::string& cl
             continue;
         }
 
-        ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
-
         try {
+            ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
+
             LOG_INFO("Now sending a heartbeat to " << id);
 
             AppendEntryResponse appendEntryResponse;
@@ -559,9 +559,9 @@ Replica::deletekey(DelResponse& _return, const std::string& key, const std::stri
             continue;
         }
 
-        ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
-
         try {
+            ReplicaServiceClient client = getServiceClient(id.hostname, id.port);
+
             LOG_INFO("Now sending an AppendEntry request to " << id << "; may take a while...");
 
             AppendEntryResponse appendEntryResponse;
