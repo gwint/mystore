@@ -1,0 +1,133 @@
+syntax = "proto2";
+
+package replica;
+
+enum EntryType {
+    EMPTY_ENTRY = 1;
+    SET_MAPPING_ENTRY = 2;
+    DEL_MAPPING_ENTRY = 3;
+    CONFIG_CHANGE_ENTRY = 4;
+    NOOP_ENTRY = 5;
+}
+
+message AppendEntryResponse {
+    required bool success = 1;
+    required int32 term = 2;
+    required int32 prevLogIndex = 3;
+    required int32 numberOfEntriesAdded = 4;
+}
+
+message Entry {
+    required EntryType type = 1;
+    required string key = 2;
+    required string value = 3;
+    required int32 term = 4;
+    required string clientIdentifier = 5;
+    required int32 requestIdentifier = 6;
+    repeated ID newConfiguration = 7;
+    repeated ID nonVotingMembers = 8;
+}
+
+message ID {
+    required string hostname = 1;
+    required int32 port = 2;
+}
+
+message PutResponse {
+    required bool success = 1;
+    required ID leaderID = 2;
+}
+
+message GetResponse {
+    required bool success = 1;
+    repeated string values = 2;
+    required ID leaderID = 3;
+}
+
+message DelResponse {
+    required bool success = 1;
+    required ID leaderID = 2;
+}
+
+message SingleReplicaInformation {
+    required string information1 = 1;
+    required string information2 = 2;
+}
+
+message GetInformationResponse {
+    required bool success = 1;
+    required ID leaderID = 2;
+    repeated SingleReplicaInformation clusterInformation = 3;
+}
+
+message GetInformationHelperResponse {
+    required bool success = 1;
+    required int32 term = 2;
+    map<string, string> replicaInformation = 3;
+}
+
+message AddConfigResponse {
+    required bool success = 1;
+    required int32 term = 2;
+    required ID leaderID = 3;
+}
+
+message VoteRequest {
+    required int32 term = 1;
+    required ID candidateID = 2;
+    required int32 lastLogIndex = 3;
+    required int32 lastLogTerm = 4;
+}
+
+message AppendEntry {
+    required int32 term = 1;
+    required ID leaderID = 2;
+    required int32 prevLogIndex = 3;
+    required int32 prevLogTerm = 4;
+    required Entry entry = 5;
+    required int32 leaderCommit = 6;
+}
+
+message GetRequest {
+    required string key = 1;
+    required string clientIdentifier = 2;
+    required int32 requestIdentifier = 3;
+    required int32 numPastMappings = 4;
+}
+
+message PutRequest {
+    required string key = 1;
+    required string value = 2;
+    required string clientIdentifier = 3;
+    required int32 requestIdentifier = 4;
+}
+
+message DeleteKeyRequest {
+    required string key = 1;
+    required string clientIdentifier = 2;
+    required int32 requestIdentifier = 3;
+}
+
+message KillRequest {}
+
+message GetInformationRequest {}
+
+message GetInformationHelperRequest {
+    required int32 term = 1;
+}
+
+message InstallSnapshotRequest {
+    required int32 leaderTerm = 1;
+    required ID leaderID = 2;
+    required int32 lastIncludedIndex = 3;
+    required int32 lastIncludedTerm = 4;
+    required int32 offset = 5;
+    required bytes data = 6;
+    required bool done = 7;
+}
+
+message AddNewConfigurationRequest {
+    repeated ID endpoints = 1;
+    required string clientIdentifier = 2;
+    required int32 requestIdentifier = 3;
+}
