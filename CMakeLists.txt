@@ -57,14 +57,6 @@ ExternalProject_Add(spdlog
     INSTALL_COMMAND ""
 )
 
-ExternalProject_Add(thrift-file
-    PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/thriftfile
-    GIT_REPOSITORY https://github.com/gwint/mystore-thrift-file.git
-    INSTALL_COMMAND ""
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ""
-)
-
 ExternalProject_Add(argparse
     PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/argparse
     GIT_REPOSITORY https://github.com/hbristow/argparse.git
@@ -76,13 +68,10 @@ ExternalProject_Add(argparse
 file(MAKE_DIRECTORY ${external-proj-dir})
 
 add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/gen-cpp
-           ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/gen-cpp/ReplicaService.cpp
-           ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/gen-cpp/replicaservice_types.cpp
-    COMMAND thrift -r --gen cpp ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/thriftfile/src/thrift-file/replicaservice.thrift
-    COMMAND thrift -r --gen py ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/thriftfile/src/thrift-file/replicaservice.thrift
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}/thriftfile/src/thrift-file/replicaservice.thrift
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${external-proj-dir}
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/replica.pb.cc
+    COMMAND protoc -I=${CMAKE_CURRENT_SOURCE_DIR} --cpp_out=${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/replica.proto
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/replica.proto
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 add_executable(MyStore
@@ -102,23 +91,23 @@ add_library(HelperFiles
     ${HelperFiles}
 )
 
-add_dependencies(ThriftFileCompilation thrift-file)
+add_library(ProtoFileCompilation
+    ${CMAKE_CURRENT_SOURCE_DIR}/replica.pb.cc
+)
 
-add_dependencies(HelperFiles ThriftFileCompilation)
+add_dependencies(HelperFiles ProtoFileCompilation)
 add_dependencies(HelperFiles spdlog)
 add_dependencies(HelperFiles cpp-dotenv)
 add_dependencies(HelperFiles argparse) 
 
 add_dependencies(MyStore HelperFiles)
-
+add_dependencies(MyStore ProtoFileCompilation)
 add_dependencies(MyStoreTests HelperFiles)
 
-target_include_directories(MyStore PRIVATE ${external-proj-dir}/gen-cpp/)
 target_include_directories(MyStore PRIVATE ${external-proj-dir}/spdlog/src/spdlog/include/)
 target_include_directories(MyStore PRIVATE ${external-proj-dir}/cpp-dotenv/src/cpp-dotenv/)
 target_include_directories(MyStore PRIVATE ${external-proj-dir}/argparse/src/argparse/)
 
-target_include_directories(HelperFiles PRIVATE ${external-proj-dir}/gen-cpp/)
 target_include_directories(HelperFiles PRIVATE ${external-proj-dir}/spdlog/src/spdlog/include/)
 target_include_directories(HelperFiles PRIVATE ${external-proj-dir}/cpp-dotenv/src/cpp-dotenv/)
 target_include_directories(HelperFiles PRIVATE ${external-proj-dir}/argparse/src/argparse/)
@@ -126,12 +115,12 @@ target_include_directories(HelperFiles PRIVATE ${external-proj-dir}/argparse/src
 target_include_directories(MyStoreTests PRIVATE ${external-proj-dir}/spdlog/src/spdlog/include/)
 target_include_directories(MyStoreTests PRIVATE ${external-proj-dir}/cpp-dotenv/src/cpp-dotenv/)
 
-target_include_directories(MyStoreTests PRIVATE ${external-proj-dir}/gen-cpp/)
+
 target_include_directories(MyStoreTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/)
 
 target_link_libraries(HelperFiles thrift)
 target_link_libraries(HelperFiles pthread)
-target_link_libraries(HelperFiles ThriftFileCompilation)
+target_link_libraries(HelperFiles ProtoFileCompilation)
 
 target_link_libraries(MyStore HelperFiles)
 

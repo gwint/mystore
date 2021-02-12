@@ -7,9 +7,7 @@
 #include "constants.hpp"
 #include "utils.hpp"
 
-#include "replicaservice_types.h"
-#include "ReplicaService.h"
-
+/*
 Entry
 getEmptyLogEntry() {
     Entry emptyLogEntry;
@@ -22,6 +20,7 @@ getEmptyLogEntry() {
 
     return emptyLogEntry;
 }
+*/
 
 unsigned int
 getElectionTimeout() {
@@ -36,6 +35,7 @@ getElectionTimeout() {
     return (rand() % (maxTimeMS - minTimeMS)) + minTimeMS;
 }
 
+/*
 std::vector<ID>
 getMemberIDs(const std::vector<std::string>& socketAddrs) {
     std::vector<ID> membership;
@@ -57,7 +57,9 @@ getMemberIDs(const std::vector<std::string>& socketAddrs) {
 
     return membership;
 }
+*/
 
+/*
 ID
 getNullID() {
     ID nullID;
@@ -71,6 +73,7 @@ bool
 isANullID(const ID& id) {
     return id.hostname == "" && id.port == 0;
 }
+*/
 
 bool
 areAMajorityGreaterThanOrEqual(std::vector<int> numLst, int num) {

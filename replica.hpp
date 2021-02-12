@@ -10,13 +10,11 @@
 #include <functional>
 #include <sstream>
 
-#include "replicaservice_types.h"
-#include "ReplicaService.h"
-
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/pattern_formatter.h"
 
+/*
 class Replica;
 
 struct Job {
@@ -122,5 +120,6 @@ operator<<(std::ostream&, const Snapshot&);
 std::istream&
 operator>>(std::istream&, Snapshot&);
 
-#endif
+*/
 
+#endif

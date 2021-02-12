@@ -28,9 +28,6 @@
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TThreadedServer.h>
 
-#include "replicaservice_types.h"
-#include "ReplicaService.h"
-
 using apache::thrift::transport::TTransportException;
 
 #ifndef NDEBUG
@@ -44,6 +41,7 @@ using apache::thrift::transport::TTransportException;
 #endif
     
 
+/*
 Replica::Replica(unsigned int port, const std::vector<std::string>& clusterSocketAddrs) : state(ReplicaState::FOLLOWER),
           currentTerm(0),
           commitIndex(0),
@@ -1091,12 +1089,6 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     for(unsigned int i = 0; i < this->log.size(); ++i) {
     }
 
-    /*
-    std::ifstream compactionFileStream(compactionFileName.c_str());
-    compactionFileStream >> this->currentSnapshot;
-    compactionFileStream.close();
-    */
-
     return termToReturn;
 }
 
@@ -1205,97 +1197,6 @@ Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& 
         catch(TTransportException& e) {
         }
     }
-
-/*
-    if(replicationAmount >= ((this->clusterMembership.size() + 1) / 2) + 1) {
-        Entry newConfigurationEntry;
-        newConfigurationEntry.type = EntryType::CONFIG_CHANGE_ENTRY;
-        newConfigurationEntry.newConfiguration = newConfiguration;
-        newConfigurationEntry.term = this->currentTerm;
-
-        this->clusterMembership = newConfiguration;
-
-        int replicationAmount = 0;
-        for(const ID& id : this->clusterMembership) {
-            std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-            socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-            socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-
-            std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-            std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-            ReplicaServiceClient client(protocol);
-
-            try {
-                transport->open();
-
-                try {
-                    AppendEntryResponse appendEntryResponse;
-                    client.appendEntry(appendEntryResponse,
-                                       this->currentTerm,
-                                       this->myID,
-                                       this->log.size()-2,
-                                       this->log.at(this->log.size()-2).term,
-                                       newConfigurationEntry,
-                                       this->commitIndex);
-
-                    if(appendEntryResponse.term > this->currentTerm) {
-                        this->state = ReplicaState::FOLLOWER;
-                        this->currentTerm = appendEntryResponse.term;
-                        this->votedFor = getNullID();
-                        break;
-                    }
-
-                    if(!appendEntryResponse.success) {
-                        this->currentTerm = appendEntryResponse.term;
-                        this->state = ReplicaState::FOLLOWER;
-                        this->votedFor = getNullID(); }
-                    else {
-                        ++replicationAmount;
-                    }
-                }
-                catch(TTransportException& e) {
-                }
-            }
-            catch(TTransportException& e) {
-            }
-        }
-
-        if(replicationAmount >= ((this->clusterMembership.size() + 1) / 2) + 1) {
-            for(const ID& id : oldConfigurationIDs) {
-                if(newConfigurationIDs.find(id) == newConfigurationIDs.end()) {
-                    std::shared_ptr<apache::thrift::transport::TSocket> socket(new apache::thrift::transport::TSocket(id.hostname, id.port));
-                    socket->setConnTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                    socket->setSendTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-                    socket->setRecvTimeout(atoi(dotenv::env[Replica::RPC_TIMEOUT_ENV_VAR_NAME].c_str()));
-
-                    std::shared_ptr<apache::thrift::transport::TTransport> transport(new apache::thrift::transport::TBufferedTransport(socket));
-                    std::shared_ptr<apache::thrift::protocol::TProtocol> protocol(new apache::thrift::protocol::TBinaryProtocol(transport));
-                    ReplicaServiceClient client(protocol);
-
-                    try {
-                        transport->open();
-
-                        try {
-                            client.kill();
-                        }
-                        catch(TTransportException& e) {
-                        }
-                    }
-                    catch(TTransportException& e) {
-                    }
-                }
-            }
-
-            this->clusterMembership = newConfiguration;
-
-            std::ofstream membershipFileObj("cluster.membership");
-            for(const ID& id : this->clusterMembership) {
-                membershipFileObj << id.hostname << ":" << id.port << "\n";
-            }
-        }
-    }
-*/
 
     //return true;
 }
@@ -1445,17 +1346,6 @@ operator>>(std::istream& is, Snapshot& snapshot) {
     snapshot.lastIncludedIndex = lastIncludedIndex;
     snapshot.lastIncludedTerm = lastIncludedTerm;
 
-    /*
-    while(is) {
-        std::string key, value;
-        is >> key >> value;
-
-        std::stack<std::string>> valueStack;
-        valueStack.push(value);
-
-        snapshot.mappings.push_back({key, value});
-    }
-    */
-
     return is;
 }
+*/
