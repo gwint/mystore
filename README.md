@@ -12,6 +12,8 @@ within the system.  See the below resources for more information about RAFT:
 - C++ >= 14
 - cmake >= 3.17.2
 - Python >= 3.7 (used for command line tool)
+- For use with the command line tool:
+	- The most recent version of the following Python modules: thrift, python-dotenv
 - Apache Thrift version >= 0.13.0
 - A Github Account (to pull in external projects used for logging and .env file reading during build)
 
@@ -19,6 +21,7 @@ within the system.  See the below resources for more information about RAFT:
 
 ```
 $ git clone https://github.com/gwint/mystore.git
+$ Add location of libthrift-0.14.2.so to LD_LIBRARY_PATH (On ubuntu 20.10, /usr/local/lib was the path I used)
 $ cd mystore
 $ mkdir build
 $ cd build
