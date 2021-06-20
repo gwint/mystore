@@ -100,7 +100,7 @@ class Replica : virtual public ReplicaServiceIf {
         void getInformationHelper(GetInformationHelperResponse &, const int32_t);
         void getInformation(GetInformationResponse &);
         int32_t installSnapshot(const int32_t, const ID&, const int32_t, const int32_t, const int32_t, const std::string&, const bool);
-        bool addNewConfiguration(const std::vector<ID> &, const std::string&, const int32_t);
+        void addNewConfiguration(AddConfigResponse& _return, const std::vector<ID> &, const std::string&, const int32_t);
         void deletekey(DelResponse&, const std::string&, const std::string&, const int32_t);
 
         void timer();

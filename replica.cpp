@@ -1862,8 +1862,8 @@ Replica::installSnapshot(const int32_t leaderTerm, const ID& leaderID, const int
     return termToReturn;
 }
 
-bool
-Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std::string& clientIdentifier, const int32_t requestIdentifier) {
+void
+Replica::addNewConfiguration(AddConfigResponse& _return, const std::vector<ID>& newConfiguration, const std::string& clientIdentifier, const int32_t requestIdentifier) {
     this->lockHandler.acquireLocks({LockName::LOG_LOCK,
                                     LockName::CURR_TERM_LOCK,
                                     LockName::STATE_LOCK,
@@ -1873,7 +1873,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                     LockName::MATCH_INDEX_LOCK});
 
     if(this->state != ReplicaState::LEADER) {
-        return false;
+        return;
     }
 
     if(requestIdentifier == this->currentRequestBeingServiced) {
@@ -1921,7 +1921,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                         LockName::NEXT_INDEX_LOCK,
                                         LockName::MATCH_INDEX_LOCK});
 
-        return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
+        //return entryIsFromCurrentTerm && areAMajorityGreaterThanOrEqual(matchIndices, relevantEntryIndex);
     }
 
     this->currentRequestBeingServiced = requestIdentifier;
@@ -2108,7 +2108,7 @@ Replica::addNewConfiguration(const std::vector<ID>& newConfiguration, const std:
                                     LockName::NEXT_INDEX_LOCK,
                                     LockName::MATCH_INDEX_LOCK});
 
-    return true;
+    //return true;
 }
 
 bool
