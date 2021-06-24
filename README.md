@@ -28,24 +28,22 @@ $ cd build
 $ cmake ..
 $ make
 ```
-Repeat these steps on each machine that will be apart of the MyStore cluster.
 
-## Start up and interact with a MyStore cluster
+## Start Up
+Start an instance with ./build/MyStore --listeningport <port-number> --clustermembership <ipaddr:port> ... <ipaddr:port>, where <ipaddr:port> is provided for every node in the cluster, ipaddr is an ip address, and port is a port number
 
-While inside the mystore directory, runnning ./build/MyStore <port-number> will
-start a MyStore node listening on a port represented by <port-number>.  Once this has been done on
-all machines whose information is included in cluster.membership, a command line tool can be used to
-start the cluster's operation and store/retrieve mappings from the cluster.  For example, the following commands
-will start the cluster, store a key-value pair within the cluster, and then retrieve the value associated with
-the stored key:
+Example: ./build/MyStore --listeningport 5000 --clustermembership 127.0.1.1:5000 127.0.1.1:5001 127.0.1.1:5002
+
+## Interact with a MyStore cluster
+
+Once all instances are started, the mystore command line tool can be used to retrieve and store key-value pairs.
 
 ```
-$ ./mystore start
-$ ./mystore put -target=127.0.1.1:5000 akey aval
-$ ./mystore get akey
+$ ./mystore members -table 127.0.1.1:5000 127.0.1.1:5001 127.0.1.1:5002
+$ ./mystore put akey aval 127.0.1.1:5000 127.0.1.1:5001 127.0.1.1:5002
+$ ./mystore get akey 127.0.1.1:5000 127.0.1.1:5001 127.0.1.1:5002
+$ ./mystore put akey aval2 127.0.1.1:5000 127.0.1.1:5001 127.0.1.1:5002
+$ ./mystore get akey -rev 1 127.0.1.1:5000 127.0.1.1:5001 127.0.1.1:5002
 ```
 
-Notice that the -target option is used on the call to put: this is because the mystore client does not keep information about the 
-cluster members.  Instead it builds up an understanding of the cluster over time as it interacts with it.  As as a result, the first command
-run using the mystore command line tool must specify a socket address to use as the target for the command.  Subsequent command do not require use
-of the target option.
+See ./mystore -h for a listing of all available commands.
