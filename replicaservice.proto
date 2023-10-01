@@ -1,0 +1,157 @@
+syntax = "proto3";
+package replicaservice;
+
+enum EntryType {
+    EMPTY_ENTRY = 0;
+    SET_MAPPING_ENTRY = 1;
+    DEL_MAPPING_ENTRY = 2;
+    CONFIG_CHANGE_ENTRY = 3;
+    NOOP_ENTRY = 4;
+}
+
+message ID {
+    string hostname = 1;
+    int32 port = 2;
+}
+
+message Entry {
+    EntryType type = 1;
+    string key = 2;
+    string value = 3;
+    int32 term = 4;
+    string clientIdentifier = 5;
+    int32 requestIdentifier = 6;
+    repeated ID newConfiguration = 7;
+    repeated ID nonVotingMembers = 8;
+}
+
+message AppendEntryResponse {
+    bool success = 1;
+    int32 term = 2;
+    int32 prevLogIndex = 3;
+    int32 numberOfEntriesAdded = 4;
+}
+
+message Ballot {
+    bool voteGranted = 1;
+    int32 term = 2;
+}
+
+message PutResponse {
+    bool success = 1;
+    ID leaderID = 2;
+}
+
+message GetResponse {
+    bool success = 1;
+    repeated string values = 2;
+    ID leaderID = 3;
+}
+
+message DelResponse {
+    bool success = 1;
+    ID leaderID = 2;
+}
+
+message ClusterInformationEntry {
+    map<string, string> information = 2;
+}
+
+message GetInformationResponse {
+    bool success = 1;
+    ID leaderID = 2;
+    repeated ClusterInformationEntry clusterInformation = 3;
+}
+
+message GetInformationHelperResponse {
+    bool success = 1;
+    int32 term = 2;
+    map<string, string> replicaInformation = 3;
+}
+
+message AddConfigResponse {
+    bool success = 1;
+    int32 term = 2;
+    ID leaderID = 3;
+}
+
+message KillResponse {}
+
+message VoteRequest {
+    int32 term = 1;
+    ID candidateId = 2;
+    int32 lastLogIndex = 3;
+    int32 lastLogTerm = 4;
+}
+
+message AppendEntryRequest {
+    int32 term = 1;
+    ID leaderID = 2;
+    int32 prevLogIndex = 3;
+    int32 prevLogTerm = 4;
+    Entry entry = 5;
+    int32 leaderCommit = 6;
+}
+
+message GetRequest {
+    string key = 1;
+    string clientIdentifier = 2;
+    int32 requestIdentifier = 3;
+    int32 numPastMappings = 4;
+}
+
+message PutRequest {
+    string key = 1;
+    string value = 2;
+    string clientIdentifier = 3;
+    int32 requestIdentifier = 4;
+}
+
+message DeleteRequest {
+    string key = 1;
+    string clientIdentifier = 2;
+    int32 requestIdentifier = 3;
+}
+
+message GetInformationHelperRequest {
+    int32 term = 1;
+}
+
+message InstallSnapshotRequest {
+    int32 leaderTerm = 1;
+    ID leaderID = 2;
+    int32 lastIncludedIndex = 3;
+    int32 lastIncludedTerm = 4;
+    int32 offset = 5;
+    bytes data = 6;
+    bool done = 7;
+}
+
+message InstallSnapshotResponse {
+    int32 retval = 1;
+}
+
+message AddConfigurationRequest {
+    repeated ID endpoints = 1;
+    string clientIdentifier = 2;
+    int32 requestIdentifier = 3;
+}
+
+message KillRequest {}
+message GetInformationRequest {}
+
+service ReplicaService {
+    rpc requestVote(VoteRequest) returns (Ballot) {}
+    rpc appendEntry(AppendEntryRequest) returns (AppendEntryResponse) {}
+    rpc get(GetRequest) returns (GetResponse) {}
+    rpc put(PutRequest) returns (PutResponse) {}
+    rpc deletekey(DeleteRequest) returns (DelResponse) {}
+    rpc kill(KillRequest) returns (KillResponse) {}
+    rpc getInformation(GetInformationRequest) returns (GetInformationResponse) {}
+    rpc getInformationHelper(GetInformationHelperRequest)
+                   returns (GetInformationHelperResponse) {}
+    rpc installSnapshot(InstallSnapshotRequest)
+                    returns (InstallSnapshotResponse) {}
+    rpc addNewConfiguration(AddConfigurationRequest)
+                                    returns (AddConfigResponse) {}
+}
